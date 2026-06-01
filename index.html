@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Insight — 投資指標分析</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Stock Insight" />
+  <meta name="theme-color" content="#58a6ff" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2128;
+      --border: #30363d;
+      --border2: #21262d;
+      --text: #e6edf3;
+      --text2: #8b949e;
+      --text3: #6e7681;
+      --accent: #58a6ff;
+      --accent-dim: rgba(88,166,255,0.12);
+      --green: #3fb950;
+      --green-dim: rgba(63,185,80,0.12);
+      --yellow: #d29922;
+      --yellow-dim: rgba(210,153,34,0.12);
+      --red: #f85149;
+      --red-dim: rgba(248,81,73,0.12);
+      --gray-dim: rgba(139,148,158,0.1);
+      --radius: 8px;
+    }
+
+    html { background: var(--bg); color: var(--text); }
+
+    body {
+      font-family: 'Noto Sans JP', sans-serif;
+      min-height: 100dvh;
+      background: var(--bg);
+    }
+
+    /* ===== Header ===== */
+    .s-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .s-logo {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 1px;
+    }
+
+    .s-logo span { color: var(--text2); font-weight: 400; }
+
+    .s-settings-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text2);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 5px 10px;
+      border-radius: var(--radius);
+      transition: all 0.15s;
+    }
+    .s-settings-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ===== Settings Panel ===== */
+    .s-settings-panel {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: none;
+    }
+    .s-settings-panel.open { display: block; }
+
+    .s-settings-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      max-width: 600px;
+    }
+
+    .s-settings-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text2);
+      white-space: nowrap;
+    }
+
+    .s-api-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 7px 12px;
+      border-radius: var(--radius);
+      outline: none;
+    }
+    .s-api-input:focus { border-color: var(--accent); }
+
+    .s-save-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .s-save-btn:hover { opacity: 0.85; }
+
+    .s-settings-hint {
+      font-size: 11px;
+      color: var(--text3);
+      margin-top: 8px;
+    }
+
+    /* ===== Main ===== */
+    .s-main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+
+    /* ===== Search ===== */
+    .s-search-wrap {
+      margin-bottom: 32px;
+    }
+
+    .s-search-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .s-search-sub {
+      font-size: 13px;
+      color: var(--text2);
+      margin-bottom: 16px;
+    }
+
+    .s-search-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .s-search-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif;
+      font-size: 16px;
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .s-search-input:focus { border-color: var(--accent); }
+    .s-search-input::placeholder { color: var(--text3); }
+
+    .s-search-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 12px 22px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .s-search-btn:hover { opacity: 0.85; }
+    .s-search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ===== Status ===== */
+    .s-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 24px;
+      font-size: 14px;
+      color: var(--text2);
+    }
+
+    .s-spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .s-error {
+      background: var(--red-dim);
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    /* ===== Company Header ===== */
+    .s-company-header {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 16px;
+      justify-content: space-between;
+    }
+
+    .s-company-info {}
+
+    .s-company-name {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+
+    .s-company-name-en {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text2);
+      margin-top: 2px;
+    }
+
+    .s-company-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .s-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      color: var(--text2);
+    }
+
+    .s-tag-ticker {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .s-company-links {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    .s-link-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: var(--radius);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      color: var(--text2);
+      background: var(--surface2);
+      transition: all 0.15s;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .s-link-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .s-link-btn-yahoo { border-color: rgba(255,48,48,0.4); color: #ff6060; }
+    .s-link-btn-yahoo:hover { border-color: #ff6060; background: rgba(255,96,96,0.1); }
+    .s-link-btn-bbs { border-color: rgba(88,166,255,0.4); color: var(--accent); }
+    .s-link-btn-bbs:hover { border-color: var(--accent); background: var(--accent-dim); }
+
+    /* ===== Metrics Grid ===== */
+    .s-section-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text3);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .s-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 600px) {
+      .s-metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .s-metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .s-metric-card:hover { border-color: var(--accent); }
+    .s-metric-card.expanded { border-color: var(--accent); background: var(--surface2); }
+
+    .s-metric-card.rating-good { border-left: 3px solid var(--green); }
+    .s-metric-card.rating-warn { border-left: 3px solid var(--yellow); }
+    .s-metric-card.rating-bad  { border-left: 3px solid var(--red); }
+    .s-metric-card.rating-na   { border-left: 3px solid var(--border); }
+
+    .s-metric-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 6px;
+    }
+
+    .s-metric-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text2);
+      font-weight: 600;
+    }
+
+    .s-metric-rating {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+    }
+    .s-metric-rating.good { background: var(--green-dim); color: var(--green); }
+    .s-metric-rating.warn { background: var(--yellow-dim); color: var(--yellow); }
+    .s-metric-rating.bad  { background: var(--red-dim); color: var(--red); }
+    .s-metric-rating.na   { background: var(--gray-dim); color: var(--text3); }
+
+    .s-metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+
+    .s-metric-unit {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text2);
+      margin-left: 2px;
+    }
+
+    .s-metric-asof {
+      font-size: 10px;
+      color: var(--text3);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .s-metric-expand {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border2);
+      display: none;
+    }
+    .s-metric-card.expanded .s-metric-expand { display: block; }
+
+    .s-metric-full-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .s-metric-desc {
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.7;
+      margin-bottom: 8px;
+    }
+
+    .s-metric-bench {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text3);
+      background: var(--bg);
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border2);
+    }
+
+    .s-metric-chevron {
+      font-size: 10px;
+      color: var(--text3);
+      float: right;
+      margin-top: 2px;
+    }
+
+    /* ===== Analysis ===== */
+    .s-analysis-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .s-analysis-text {
+      font-size: 14px;
+      color: var(--text2);
+      line-height: 1.8;
+      margin-bottom: 16px;
+    }
+
+    .s-str-risk-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 500px) {
+      .s-str-risk-grid { grid-template-columns: 1fr; }
+    }
+
+    .s-str-panel, .s-risk-panel {
+      padding: 12px;
+      border-radius: var(--radius);
+    }
+
+    .s-str-panel {
+      background: var(--green-dim);
+      border: 1px solid rgba(63,185,80,0.25);
+    }
+
+    .s-risk-panel {
+      background: var(--red-dim);
+      border: 1px solid rgba(248,81,73,0.25);
+    }
+
+    .s-str-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--green);
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+
+    .s-risk-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--red);
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+
+    .s-str-item, .s-risk-item {
+      font-size: 12px;
+      line-height: 1.6;
+      padding: 3px 0;
+    }
+
+    .s-str-item { color: var(--green); }
+    .s-risk-item { color: var(--red); }
+
+    /* ===== Disclaimer ===== */
+    .s-disclaimer {
+      background: var(--yellow-dim);
+      border: 1px solid rgba(210,153,34,0.3);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 12px;
+      color: var(--yellow);
+      line-height: 1.6;
+    }
+
+    .s-disclaimer strong {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    /* ===== Hidden ===== */
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- ===== Header ===== -->
+  <header class="s-header">
+    <div class="s-logo">STOCK<span>INSIGHT</span></div>
+    <button class="s-settings-btn" title="API設定" onclick="toggleSettings()">⚙</button>
+  </header>
+
+  <!-- ===== Settings Panel ===== -->
+  <div class="s-settings-panel" id="settings-panel">
+    <div class="s-settings-row">
+      <span class="s-settings-label">API KEY</span>
+      <input type="password" class="s-api-input" id="api-key-input" placeholder="sk-ant-..." />
+      <button class="s-save-btn" onclick="saveApiKey()">保存</button>
+    </div>
+    <div class="s-settings-hint">Anthropic API キー · ローカルストレージにのみ保存されます</div>
+  </div>
+
+  <!-- ===== Main ===== -->
+  <main class="s-main">
+
+    <!-- Search -->
+    <div class="s-search-wrap">
+      <div class="s-search-title">企業財務指標 分析</div>
+      <div class="s-search-sub">銘柄コード（例: 7203）または企業名（例: トヨタ）で検索</div>
+      <div class="s-search-row">
+        <input
+          type="text"
+          class="s-search-input"
+          id="search-input"
+          placeholder="7203 / トヨタ / Toyota Motor"
+          onkeydown="if(event.key==='Enter') analyzeStock()"
+        />
+        <button class="s-search-btn" id="search-btn" onclick="analyzeStock()">分析する</button>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="s-status hidden" id="status-box">
+      <div class="s-spinner" id="status-spinner"></div>
+      <span id="status-text">Claude AI が企業情報を分析しています...</span>
+    </div>
+
+    <!-- Result -->
+    <div id="result-area" class="hidden"></div>
+
+  </main>
+
+  <script>
+  // ===== Constants =====
+  const API_KEY_STORAGE = 'stock_anthropic_key';
+
+  const METRIC_DEFS = {
+    per: {
+      name: 'PER',
+      fullName: '株価収益率 (Price Earnings Ratio)',
+      unit: '倍',
+      desc: '株価が1株当たり純利益の何倍かを示す指標。投資家が1円の利益に対してどれだけ払っているかを表す。成長期待が高いほど高くなる傾向。',
+      bench: '目安: 割安<15倍 / 標準15〜25倍 / 割高>25倍（業種により異なる）',
+      isGood: v => v > 0 && v < 15,
+      isWarn: v => v >= 15 && v <= 25,
+      isBad: v => v > 25 || v <= 0,
+      formatVal: v => v == null ? 'N/A' : v.toFixed(1),
+    },
+    pbr: {
+      name: 'PBR',
+      fullName: '株価純資産倍率 (Price Book-value Ratio)',
+      unit: '倍',
+      desc: '株価が1株当たり純資産(帳簿価格)の何倍かを示す指標。1倍未満は理論上の解散価値より株価が低いことを意味する。',
+      bench: '目安: 割安<1倍 / 標準1〜2倍 / 割高>3倍',
+      isGood: v => v > 0 && v < 1.5,
+      isWarn: v => v >= 1.5 && v <= 3,
+      isBad: v => v > 3 || v <= 0,
+      formatVal: v => v == null ? 'N/A' : v.toFixed(2),
+    },
+    roe: {
+      name: 'ROE',
+      fullName: '自己資本利益率 (Return on Equity)',
+      unit: '%',
+      desc: '自己資本（株主資本）に対してどれだけの利益を生み出したかを示す指標。株主から見た経営効率を表す。高いほど資本を効率的に使っている。',
+      bench: '目安: 優良>15% / 標準8〜15% / 要改善<8%',
+      isGood: v => v >= 15,
+      isWarn: v => v >= 8 && v < 15,
+      isBad: v => v < 8,
+      formatVal: v => v == null ? 'N/A' : v.toFixed(1),
+    },
+    roa: {
+      name: 'ROA',
+      fullName: '総資産利益率 (Return on Assets)',
+      unit: '%',
+      desc: '総資産に対してどれだけの利益を生み出したかを示す指標。負債も含めた全資産の活用効率を表す。業種によって適正水準が大きく異なる。',
+      bench: '目安: 優良>5% / 標準2〜5% / 要改善<2%',
+      isGood: v => v >= 5,
+      isWarn: v => v >= 2 && v < 5,
+      isBad: v => v < 2,
+      formatVal: v => v == null ? 'N/A' : v.toFixed(1),
+    },
+    equity_ratio: {
+      name: '自己資本比率',
+      fullName: '自己資本比率 (Equity Ratio)',
+      unit: '%',
+      desc: '総資産に占める自己資本（株主資本）の割合。高いほど財務健全性が高く、倒産リスクが低い。金融・不動産業は構造上低くなりやすい。',
+      bench: '目安: 優良>50% / 標準30〜50% / 要注意<30%',
+      isGood: v => v >= 50,
+      isWarn: v => v >= 30 && v < 50,
+      isBad: v => v < 30,
+      formatVal: v => v == null ? 'N/A' : v.toFixed(1),
+    },
+    operating_margin: {
+      name: '営業利益率',
+      fullName: '営業利益率 (Operating Margin)',
+      unit: '%',
+      desc: '売上高に対する営業利益の割合。本業でどれだけ効率よく稼いでいるかを示す。業種によって水準が大きく異なるため、同業他社との比較が重要。',
+      bench: '目安: 優良>15% / 標準5〜15% / 要改善<5%',
+      isGood: v => v >= 15,
+      isWarn: v => v >= 5 && v < 15,
+      isBad: v => v < 5,
+      formatVal: v => v == null ? 'N/A' : v.toFixed(1),
+    },
+    dividend_yield: {
+      name: '配当利回り',
+      fullName: '配当利回り (Dividend Yield)',
+      unit: '%',
+      desc: '株価に対する年間配当金の割合。高いほど株主への還元が大きいが、業績悪化による減配リスクも考慮が必要。成長企業は低い傾向。',
+      bench: '目安: 高配当>3% / 標準1〜3% / 無配当<1%',
+      isGood: v => v >= 3,
+      isWarn: v => v >= 1 && v < 3,
+      isBad: v => v < 1,
+      formatVal: v => v == null ? 'N/A' : v.toFixed(2),
+    },
+    market_cap: {
+      name: '時価総額',
+      fullName: '時価総額 (Market Capitalization)',
+      unit: '',
+      desc: '株価×発行済株式数で計算される、市場が評価する企業の価値総額。大型株(1兆円超)、中型株(1000〜1兆円)、小型株(1000億円未満)に分類されることが多い。',
+      bench: '大型: >1兆円 / 中型: 1000億〜1兆円 / 小型: <1000億円',
+      isGood: () => null,
+      isWarn: () => null,
+      isBad: () => null,
+      formatVal: (v, unit) => {
+        if (v == null) return 'N/A';
+        if (unit === '億円') {
+          if (v >= 10000) return (v / 10000).toFixed(1) + '兆';
+          return v.toLocaleString();
+        }
+        if (unit === '百万ドル') {
+          if (v >= 1000000) return (v / 1000000).toFixed(1) + 'T';
+          if (v >= 1000) return (v / 1000).toFixed(1) + 'B';
+          return v.toLocaleString();
+        }
+        return v.toLocaleString();
+      },
+      getUnit: (unit) => {
+        if (unit === '億円') return '億円';
+        if (unit === '百万ドル') return 'M USD';
+        return unit || '';
+      }
+    },
+    revenue: {
+      name: '売上高',
+      fullName: '売上高 (Revenue)',
+      unit: '',
+      desc: '一定期間内に企業が商品・サービスの提供によって得た総収益。事業規模を把握する基本指標。成長率や利益率と合わせて分析することが重要。',
+      bench: '規模の参考指標。単体ではなく成長率・利益率と合わせて評価。',
+      isGood: () => null,
+      isWarn: () => null,
+      isBad: () => null,
+      formatVal: (v, unit) => {
+        if (v == null) return 'N/A';
+        if (unit === '億円') {
+          if (v >= 10000) return (v / 10000).toFixed(1) + '兆';
+          return v.toLocaleString();
+        }
+        if (unit === '百万ドル') {
+          if (v >= 1000000) return (v / 1000000).toFixed(1) + 'T';
+          if (v >= 1000) return (v / 1000).toFixed(1) + 'B';
+          return v.toLocaleString();
+        }
+        return v.toLocaleString();
+      },
+      getUnit: (unit) => {
+        if (unit === '億円') return '億円';
+        if (unit === '百万ドル') return 'M USD';
+        return unit || '';
+      }
+    },
+  };
+
+  // ===== State =====
+  let currentResult = null;
+  let expandedMetric = null;
+
+  // ===== Init =====
+  window.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem(API_KEY_STORAGE);
+    if (saved) document.getElementById('api-key-input').value = saved;
+  });
+
+  // ===== Settings =====
+  function toggleSettings() {
+    const panel = document.getElementById('settings-panel');
+    panel.classList.toggle('open');
+  }
+
+  function saveApiKey() {
+    const val = document.getElementById('api-key-input').value.trim();
+    if (!val) return;
+    localStorage.setItem(API_KEY_STORAGE, val);
+    toggleSettings();
+  }
+
+  // ===== Search =====
+  async function analyzeStock() {
+    const query = document.getElementById('search-input').value.trim();
+    if (!query) { showError('企業名または証券コードを入力してください'); return; }
+
+    const apiKey = localStorage.getItem(API_KEY_STORAGE) || document.getElementById('api-key-input').value.trim();
+    if (!apiKey) {
+      toggleSettings();
+      showError('⚙ API キーを設定してください');
+      return;
+    }
+
+    showStatus('Claude AI が企業情報を分析しています...');
+    document.getElementById('search-btn').disabled = true;
+    document.getElementById('result-area').classList.add('hidden');
+
+    try {
+      const data = await callClaude(query, apiKey);
+      currentResult = data;
+      renderResult(data);
+    } catch (e) {
+      showError('エラー: ' + (e.message || '不明なエラー'));
+    } finally {
+      document.getElementById('search-btn').disabled = false;
+    }
+  }
+
+  // ===== Claude API =====
+  async function callClaude(query, apiKey) {
+    const prompt = `You are a financial data analyst specializing in Japanese stocks. The user searched for: "${query}"
+
+Return ONLY valid JSON (no markdown, no explanation) matching this exact structure:
+
+{
+  "found": true,
+  "company_name": "正式日本語社名",
+  "company_name_en": "Official English name",
+  "ticker": "証券コード (e.g. 7203 for JP, AAPL for US)",
+  "market": "東証プライム / 東証スタンダード / NYSE / NASDAQ など",
+  "sector": "業種（日本語）",
+  "country": "JP or US",
+  "metrics": {
+    "per": { "value": 14.5, "as_of": "FY2024" },
+    "pbr": { "value": 1.2, "as_of": "FY2024" },
+    "roe": { "value": 18.5, "as_of": "FY2024" },
+    "roa": { "value": 5.2, "as_of": "FY2024" },
+    "equity_ratio": { "value": 43.2, "as_of": "FY2024" },
+    "operating_margin": { "value": 9.5, "as_of": "FY2024" },
+    "dividend_yield": { "value": 2.1, "as_of": "直近" },
+    "market_cap": { "value": 400000, "as_of": "概算", "unit": "億円" },
+    "revenue": { "value": 450000, "as_of": "FY2024", "unit": "億円" }
+  },
+  "analysis": "150〜200字の投資分析（日本語）",
+  "strengths": ["強み1", "強み2", "強み3"],
+  "risks": ["リスク1", "リスク2", "リスク3"],
+  "yahoo_finance_jp_url": "https://finance.yahoo.co.jp/quote/7203.T",
+  "yahoo_bbs_url": "https://finance.yahoo.co.jp/cm/message/1017203",
+  "data_note": "データの時点や精度に関する注記（簡潔に）"
+}
+
+For US stocks: use "百万ドル" as unit for market_cap and revenue. For JP stocks: use "億円".
+If the company is not found or ambiguous, return: { "found": false, "message": "理由（日本語）" }
+Use your training data for approximate figures. All values are estimates for educational purposes.`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1200,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+
+    const body = await res.json();
+    const text = body.content[0].text.trim();
+
+    // Strip markdown fences if present
+    const cleaned = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    const data = JSON.parse(cleaned);
+    return data;
+  }
+
+  // ===== Render =====
+  function renderResult(data) {
+    hideStatus();
+    const area = document.getElementById('result-area');
+
+    if (!data.found) {
+      area.innerHTML = `
+        <div class="s-status s-error">
+          <span>❌ ${data.message || '企業が見つかりませんでした'}</span>
+        </div>`;
+      area.classList.remove('hidden');
+      return;
+    }
+
+    area.innerHTML = '';
+
+    // Disclaimer
+    const disc = document.createElement('div');
+    disc.className = 's-disclaimer';
+    disc.innerHTML = `<strong>⚠ AI データに関する注意</strong>
+      このデータは Claude AI のトレーニングデータに基づく推定値です。リアルタイムデータではなく、実際の投資判断には必ず公式財務諸表・最新データをご確認ください。
+      ${data.data_note ? '<br><em>' + data.data_note + '</em>' : ''}`;
+    area.appendChild(disc);
+
+    // Company header
+    const m = data.metrics || {};
+    const yUrl = data.yahoo_finance_jp_url || '';
+    const bUrl = data.yahoo_bbs_url || '';
+
+    const hdr = document.createElement('div');
+    hdr.className = 's-company-header';
+    hdr.innerHTML = `
+      <div class="s-company-info">
+        <div class="s-company-name">${esc(data.company_name)}</div>
+        <div class="s-company-name-en">${esc(data.company_name_en || '')}</div>
+        <div class="s-company-tags">
+          <span class="s-tag s-tag-ticker">${esc(data.ticker || '')}</span>
+          <span class="s-tag">${esc(data.market || '')}</span>
+          <span class="s-tag">${esc(data.sector || '')}</span>
+        </div>
+      </div>
+      <div class="s-company-links">
+        ${yUrl ? `<a href="${esc(yUrl)}" target="_blank" rel="noopener" class="s-link-btn s-link-btn-yahoo">📊 Yahoo Finance</a>` : ''}
+        ${bUrl ? `<a href="${esc(bUrl)}" target="_blank" rel="noopener" class="s-link-btn s-link-btn-bbs">💬 Y!掲示板</a>` : ''}
+      </div>`;
+    area.appendChild(hdr);
+
+    // Metrics
+    const metLabel = document.createElement('div');
+    metLabel.className = 's-section-label';
+    metLabel.textContent = '財務指標';
+    area.appendChild(metLabel);
+
+    const grid = document.createElement('div');
+    grid.className = 's-metrics-grid';
+
+    for (const [key, def] of Object.entries(METRIC_DEFS)) {
+      const mv = m[key];
+      const val = mv?.value ?? null;
+      const asof = mv?.as_of || '';
+      const unit = mv?.unit || def.unit || '';
+
+      let ratingClass = 'na';
+      let ratingLabel = 'N/A';
+      if (val !== null) {
+        if (def.isGood(val)) { ratingClass = 'good'; ratingLabel = '優良'; }
+        else if (def.isWarn(val)) { ratingClass = 'warn'; ratingLabel = '標準'; }
+        else if (def.isBad(val)) { ratingClass = 'bad'; ratingLabel = '注意'; }
+        else { ratingClass = 'na'; ratingLabel = '参考'; }
+      }
+
+      const dispVal = def.formatVal ? def.formatVal(val, unit) : (val != null ? val : 'N/A');
+      const dispUnit = def.getUnit ? def.getUnit(unit) : def.unit;
+
+      // Special handling for market_cap/revenue: show formatted unit
+      let unitDisplay = def.unit;
+      if (key === 'market_cap' || key === 'revenue') {
+        unitDisplay = def.getUnit(unit);
+        // If value was reformatted (e.g., "40.0兆"), don't show unit separately when it's embedded
+        // we'll just show it inline
+      }
+
+      // For large values that were reformatted to include 兆/T/B, clear the separate unit
+      const isLarge = (key === 'market_cap' || key === 'revenue') && dispVal !== 'N/A' && (dispVal.includes('兆') || dispVal.includes('T') || dispVal.includes('B'));
+
+      const card = document.createElement('div');
+      card.className = `s-metric-card rating-${ratingClass === 'na' ? 'na' : ratingClass}`;
+      card.dataset.key = key;
+      card.innerHTML = `
+        <div class="s-metric-top">
+          <div class="s-metric-name">${esc(def.name)} <span class="s-metric-chevron" id="chev-${key}">▼</span></div>
+          ${ratingLabel !== 'N/A' ? `<span class="s-metric-rating ${ratingClass}">${ratingLabel}</span>` : `<span class="s-metric-rating na">参考</span>`}
+        </div>
+        <div class="s-metric-value">
+          ${esc(dispVal)}<span class="s-metric-unit">${isLarge ? '' : esc(unitDisplay || def.unit)}</span>
+        </div>
+        ${asof ? `<div class="s-metric-asof">${esc(asof)}</div>` : ''}
+        <div class="s-metric-expand">
+          <div class="s-metric-full-name">${esc(def.fullName)}</div>
+          <div class="s-metric-desc">${esc(def.desc)}</div>
+          <div class="s-metric-bench">${esc(def.bench)}</div>
+        </div>`;
+      card.addEventListener('click', () => toggleMetric(key));
+      grid.appendChild(card);
+    }
+
+    area.appendChild(grid);
+
+    // Analysis
+    if (data.analysis || (data.strengths && data.strengths.length) || (data.risks && data.risks.length)) {
+      const anaLabel = document.createElement('div');
+      anaLabel.className = 's-section-label';
+      anaLabel.textContent = 'AI 分析';
+      area.appendChild(anaLabel);
+
+      const anaCard = document.createElement('div');
+      anaCard.className = 's-analysis-card';
+
+      if (data.analysis) {
+        const atxt = document.createElement('div');
+        atxt.className = 's-analysis-text';
+        atxt.textContent = data.analysis;
+        anaCard.appendChild(atxt);
+      }
+
+      if ((data.strengths && data.strengths.length) || (data.risks && data.risks.length)) {
+        const srGrid = document.createElement('div');
+        srGrid.className = 's-str-risk-grid';
+
+        if (data.strengths && data.strengths.length) {
+          const strPanel = document.createElement('div');
+          strPanel.className = 's-str-panel';
+          strPanel.innerHTML = `<div class="s-str-title">✓ 強み</div>` +
+            data.strengths.map(s => `<div class="s-str-item">✓ ${esc(s)}</div>`).join('');
+          srGrid.appendChild(strPanel);
+        }
+
+        if (data.risks && data.risks.length) {
+          const riskPanel = document.createElement('div');
+          riskPanel.className = 's-risk-panel';
+          riskPanel.innerHTML = `<div class="s-risk-title">⚠ リスク</div>` +
+            data.risks.map(r => `<div class="s-risk-item">⚠ ${esc(r)}</div>`).join('');
+          srGrid.appendChild(riskPanel);
+        }
+
+        anaCard.appendChild(srGrid);
+      }
+
+      area.appendChild(anaCard);
+    }
+
+    area.classList.remove('hidden');
+  }
+
+  function toggleMetric(key) {
+    const card = document.querySelector(`[data-key="${key}"]`);
+    const chev = document.getElementById(`chev-${key}`);
+    if (!card) return;
+
+    if (card.classList.contains('expanded')) {
+      card.classList.remove('expanded');
+      if (chev) chev.textContent = '▼';
+      expandedMetric = null;
+    } else {
+      // close previous
+      if (expandedMetric) {
+        const prev = document.querySelector(`[data-key="${expandedMetric}"]`);
+        const prevChev = document.getElementById(`chev-${expandedMetric}`);
+        if (prev) prev.classList.remove('expanded');
+        if (prevChev) prevChev.textContent = '▼';
+      }
+      card.classList.add('expanded');
+      if (chev) chev.textContent = '▲';
+      expandedMetric = key;
+    }
+  }
+
+  // ===== UI helpers =====
+  function showStatus(msg, isError = false) {
+    const box = document.getElementById('status-box');
+    const spinner = document.getElementById('status-spinner');
+    const text = document.getElementById('status-text');
+    text.textContent = msg;
+    spinner.style.display = isError ? 'none' : 'block';
+    box.className = 's-status' + (isError ? ' s-error' : '');
+    box.classList.remove('hidden');
+  }
+
+  function showError(msg) {
+    showStatus(msg, true);
+  }
+
+  function hideStatus() {
+    document.getElementById('status-box').classList.add('hidden');
+  }
+
+  function esc(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  </script>
+</body>
+</html>
