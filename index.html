@@ -641,14 +641,14 @@
       <input type="password" class="s-api-input" id="api-key-input" placeholder="sk-ant-..." />
     </div>
     <div class="s-settings-row" style="margin-top:8px">
-      <span class="s-settings-label">FMP KEY</span>
-      <input type="password" class="s-api-input" id="fmp-key-input" placeholder="Financial Modeling Prep API キー（株価用）" />
+      <span class="s-settings-label">AV KEY</span>
+      <input type="password" class="s-api-input" id="fmp-key-input" placeholder="Alpha Vantage API キー（株価用）" />
     </div>
     <div style="margin-top:10px">
       <button class="s-save-btn" onclick="saveAllKeys()">保存</button>
     </div>
     <div class="s-settings-hint">
-      Anthropic: 財務指標AI分析 · FMP: リアルタイム株価（<a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener" style="color:var(--accent)">無料登録</a> → APIキーを取得）<br>
+      Anthropic: 財務指標AI分析 · Alpha Vantage: リアルタイム株価（<a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener" style="color:var(--accent)">無料取得</a> · 日本株・米国株対応 · 25回/日）<br>
       両キーはこのブラウザのローカルストレージにのみ保存されます
     </div>
   </div>
@@ -686,7 +686,7 @@
   <script>
   // ===== Constants =====
   const API_KEY_STORAGE = 'stock_anthropic_key';
-  const FMP_KEY_STORAGE = 'stock_fmp_key';
+  const AV_KEY_STORAGE = 'stock_av_key';
 
   const METRIC_DEFS = {
     per: {
@@ -832,8 +832,8 @@
   window.addEventListener('DOMContentLoaded', () => {
     const saved = localStorage.getItem(API_KEY_STORAGE);
     if (saved) document.getElementById('api-key-input').value = saved;
-    const fmpSaved = localStorage.getItem(FMP_KEY_STORAGE);
-    if (fmpSaved) document.getElementById('fmp-key-input').value = fmpSaved;
+    const avSaved = localStorage.getItem(AV_KEY_STORAGE);
+    if (avSaved) document.getElementById('fmp-key-input').value = avSaved;
   });
 
   // ===== Settings =====
@@ -846,7 +846,7 @@
     const ant = document.getElementById('api-key-input').value.trim();
     const fmp = document.getElementById('fmp-key-input').value.trim();
     if (ant) localStorage.setItem(API_KEY_STORAGE, ant);
-    if (fmp) localStorage.setItem(FMP_KEY_STORAGE, fmp);
+    if (fmp) localStorage.setItem(AV_KEY_STORAGE, fmp);
     toggleSettings();
   }
 
@@ -1103,64 +1103,71 @@ Use your training data for approximate figures. All values are estimates for edu
     area.classList.remove('hidden');
   }
 
-  // ===== Live Price (FMP) =====
+  // ===== Live Price (Alpha Vantage) =====
   async function fetchLivePrice(ticker, country) {
     const bar = document.getElementById('price-bar');
     if (!bar) return;
 
-    const fmpKey = localStorage.getItem(FMP_KEY_STORAGE);
-    if (!fmpKey) {
-      bar.innerHTML = `<div class="s-price-no-key">株価を表示するには <a onclick="toggleSettings()">⚙ 設定</a> から FMP API キーを登録してください（<a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener">無料取得</a>）</div>`;
+    const avKey = localStorage.getItem(AV_KEY_STORAGE);
+    if (!avKey) {
+      bar.innerHTML = `<div class="s-price-no-key">株価を表示するには <a onclick="toggleSettings()">⚙ 設定</a> から Alpha Vantage API キーを登録してください（<a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener">無料取得</a>）</div>`;
       return;
     }
 
-    // Build FMP ticker symbol
-    let fmpTicker = ticker || '';
-    if (country === 'JP' && /^\d{4}$/.test(fmpTicker)) {
-      fmpTicker = fmpTicker + '.T';
+    // Build Alpha Vantage symbol: JP → "7203.T", US → "NVDA"
+    let symbol = ticker || '';
+    if (country === 'JP' && /^\d{4}$/.test(symbol)) {
+      symbol = symbol + '.T';
     }
 
     try {
-      const res = await fetch(`https://financialmodelingprep.com/api/v3/quote/${encodeURIComponent(fmpTicker)}?apikey=${encodeURIComponent(fmpKey)}`);
+      const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(avKey)}`;
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
 
-      if (!Array.isArray(json) || json.length === 0) {
-        bar.innerHTML = `<div class="s-price-no-key">株価データが見つかりませんでした（${esc(fmpTicker)}）</div>`;
+      if (json['Note'] || json['Information']) {
+        // Rate limit hit
+        bar.innerHTML = `<div class="s-price-no-key">⚠ API制限中（25回/日）。しばらく後でお試しください。</div>`;
         return;
       }
 
-      const q = json[0];
-      const price = q.price;
-      const change = q.change;
-      const pct = q.changesPercentage;
-      const currency = q.currency || (country === 'JP' ? 'JPY' : 'USD');
-      const low = q.dayLow;
-      const high = q.dayHigh;
-      const vol = q.volume;
-      const prevClose = q.previousClose;
-      const time = q.timestamp ? new Date(q.timestamp * 1000).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '';
+      const q = json['Global Quote'];
+      if (!q || !q['05. price']) {
+        bar.innerHTML = `<div class="s-price-no-key">株価データが見つかりませんでした（${esc(symbol)}）</div>`;
+        return;
+      }
+
+      const price = parseFloat(q['05. price']);
+      const change = parseFloat(q['09. change']);
+      const pctStr = q['10. change percent'] || '0%';
+      const pct = parseFloat(pctStr.replace('%', ''));
+      const low = parseFloat(q['04. low']);
+      const high = parseFloat(q['03. high']);
+      const vol = parseInt(q['06. volume'], 10);
+      const prevClose = parseFloat(q['08. previous close']);
+      const latestDay = q['07. latest trading day'] || '';
+
+      const isJP = country === 'JP';
+      const currencyLabel = isJP ? '円' : 'USD';
+      const fmt = (v, decimals) => isJP
+        ? Math.round(v).toLocaleString('ja-JP')
+        : v.toFixed(decimals ?? 2);
 
       const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
       const changeSign = change > 0 ? '+' : '';
 
-      const priceStr = currency === 'JPY'
-        ? price.toLocaleString('ja-JP', { maximumFractionDigits: 0 })
-        : price.toFixed(2);
-
-      const currencyLabel = currency === 'JPY' ? '円' : currency;
-
       bar.innerHTML = `
         <div class="s-price-main">
-          <div class="s-price-value">${esc(priceStr)}</div>
+          <div class="s-price-value">${esc(fmt(price))}</div>
           <div class="s-price-currency">${esc(currencyLabel)}</div>
-          <div class="s-price-change ${changeClass}">${changeSign}${esc(change?.toFixed(currency === 'JPY' ? 0 : 2))} (${changeSign}${esc(pct?.toFixed(2))}%)</div>
+          <div class="s-price-change ${changeClass}">${changeSign}${esc(fmt(change))} (${changeSign}${esc(pct.toFixed(2))}%)</div>
         </div>
         <div class="s-price-meta">
-          ${prevClose != null ? `<div class="s-price-meta-item">前日終値<span>${currency === 'JPY' ? prevClose.toLocaleString() : prevClose.toFixed(2)}</span></div>` : ''}
-          ${low != null && high != null ? `<div class="s-price-meta-item">日中レンジ<span>${currency === 'JPY' ? low.toLocaleString() : low.toFixed(2)} – ${currency === 'JPY' ? high.toLocaleString() : high.toFixed(2)}</span></div>` : ''}
-          ${vol != null ? `<div class="s-price-meta-item">出来高<span>${(vol / 1000).toFixed(0)}K</span></div>` : ''}
-          ${time ? `<div class="s-price-meta-item">取得<span>${time}</span></div>` : ''}
+          ${!isNaN(prevClose) ? `<div class="s-price-meta-item">前日終値<span>${esc(fmt(prevClose))}</span></div>` : ''}
+          ${!isNaN(low) && !isNaN(high) ? `<div class="s-price-meta-item">日中レンジ<span>${esc(fmt(low))} – ${esc(fmt(high))}</span></div>` : ''}
+          ${!isNaN(vol) ? `<div class="s-price-meta-item">出来高<span>${(vol / 1000).toFixed(0)}K</span></div>` : ''}
+          ${latestDay ? `<div class="s-price-meta-item">最終取引日<span>${esc(latestDay)}</span></div>` : ''}
         </div>
         <div class="s-price-live">LIVE</div>`;
     } catch (e) {
