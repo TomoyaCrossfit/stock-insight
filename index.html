@@ -505,6 +505,103 @@
     .s-str-item { color: var(--green); }
     .s-risk-item { color: var(--red); }
 
+    /* ===== Price Bar ===== */
+    .s-price-bar {
+      border-top: 1px solid var(--border2);
+      margin-top: 16px;
+      padding-top: 14px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .s-price-main {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .s-price-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .s-price-currency {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text2);
+    }
+
+    .s-price-change {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .s-price-change.up   { color: var(--green); background: var(--green-dim); }
+    .s-price-change.down { color: var(--red);   background: var(--red-dim); }
+    .s-price-change.flat { color: var(--text2); background: var(--gray-dim); }
+
+    .s-price-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-left: auto;
+    }
+
+    .s-price-meta-item {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    .s-price-meta-item span {
+      color: var(--text2);
+      margin-left: 4px;
+    }
+
+    .s-price-live {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--green);
+      background: var(--green-dim);
+      border: 1px solid rgba(63,185,80,0.3);
+      padding: 2px 7px;
+      border-radius: 3px;
+      letter-spacing: 1px;
+      animation: pulse-live 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-live {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .s-price-loading {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text3);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .s-price-no-key {
+      font-size: 12px;
+      color: var(--text3);
+    }
+
+    .s-price-no-key a {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
     /* ===== Disclaimer ===== */
     .s-disclaimer {
       background: var(--yellow-dim);
@@ -540,11 +637,20 @@
   <!-- ===== Settings Panel ===== -->
   <div class="s-settings-panel" id="settings-panel">
     <div class="s-settings-row">
-      <span class="s-settings-label">API KEY</span>
+      <span class="s-settings-label">ANTHROPIC</span>
       <input type="password" class="s-api-input" id="api-key-input" placeholder="sk-ant-..." />
-      <button class="s-save-btn" onclick="saveApiKey()">保存</button>
     </div>
-    <div class="s-settings-hint">Anthropic API キー · ローカルストレージにのみ保存されます</div>
+    <div class="s-settings-row" style="margin-top:8px">
+      <span class="s-settings-label">FMP KEY</span>
+      <input type="password" class="s-api-input" id="fmp-key-input" placeholder="Financial Modeling Prep API キー（株価用）" />
+    </div>
+    <div style="margin-top:10px">
+      <button class="s-save-btn" onclick="saveAllKeys()">保存</button>
+    </div>
+    <div class="s-settings-hint">
+      Anthropic: 財務指標AI分析 · FMP: リアルタイム株価（<a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener" style="color:var(--accent)">無料登録</a> → APIキーを取得）<br>
+      両キーはこのブラウザのローカルストレージにのみ保存されます
+    </div>
   </div>
 
   <!-- ===== Main ===== -->
@@ -580,6 +686,7 @@
   <script>
   // ===== Constants =====
   const API_KEY_STORAGE = 'stock_anthropic_key';
+  const FMP_KEY_STORAGE = 'stock_fmp_key';
 
   const METRIC_DEFS = {
     per: {
@@ -725,6 +832,8 @@
   window.addEventListener('DOMContentLoaded', () => {
     const saved = localStorage.getItem(API_KEY_STORAGE);
     if (saved) document.getElementById('api-key-input').value = saved;
+    const fmpSaved = localStorage.getItem(FMP_KEY_STORAGE);
+    if (fmpSaved) document.getElementById('fmp-key-input').value = fmpSaved;
   });
 
   // ===== Settings =====
@@ -733,10 +842,11 @@
     panel.classList.toggle('open');
   }
 
-  function saveApiKey() {
-    const val = document.getElementById('api-key-input').value.trim();
-    if (!val) return;
-    localStorage.setItem(API_KEY_STORAGE, val);
+  function saveAllKeys() {
+    const ant = document.getElementById('api-key-input').value.trim();
+    const fmp = document.getElementById('fmp-key-input').value.trim();
+    if (ant) localStorage.setItem(API_KEY_STORAGE, ant);
+    if (fmp) localStorage.setItem(FMP_KEY_STORAGE, fmp);
     toggleSettings();
   }
 
@@ -877,8 +987,14 @@ Use your training data for approximate figures. All values are estimates for edu
       <div class="s-company-links">
         ${yUrl ? `<a href="${esc(yUrl)}" target="_blank" rel="noopener" class="s-link-btn s-link-btn-yahoo">📊 Yahoo Finance</a>` : ''}
         ${bUrl ? `<a href="${esc(bUrl)}" target="_blank" rel="noopener" class="s-link-btn s-link-btn-bbs">💬 Y!掲示板</a>` : ''}
+      </div>
+      <div class="s-price-bar" id="price-bar" style="width:100%">
+        <div class="s-price-loading"><div class="s-spinner" style="width:14px;height:14px;border-width:2px"></div> 株価を取得中...</div>
       </div>`;
     area.appendChild(hdr);
+
+    // Fetch live price asynchronously (non-blocking)
+    fetchLivePrice(data.ticker, data.country);
 
     // Metrics
     const metLabel = document.createElement('div');
@@ -985,6 +1101,71 @@ Use your training data for approximate figures. All values are estimates for edu
     }
 
     area.classList.remove('hidden');
+  }
+
+  // ===== Live Price (FMP) =====
+  async function fetchLivePrice(ticker, country) {
+    const bar = document.getElementById('price-bar');
+    if (!bar) return;
+
+    const fmpKey = localStorage.getItem(FMP_KEY_STORAGE);
+    if (!fmpKey) {
+      bar.innerHTML = `<div class="s-price-no-key">株価を表示するには <a onclick="toggleSettings()">⚙ 設定</a> から FMP API キーを登録してください（<a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener">無料取得</a>）</div>`;
+      return;
+    }
+
+    // Build FMP ticker symbol
+    let fmpTicker = ticker || '';
+    if (country === 'JP' && /^\d{4}$/.test(fmpTicker)) {
+      fmpTicker = fmpTicker + '.T';
+    }
+
+    try {
+      const res = await fetch(`https://financialmodelingprep.com/api/v3/quote/${encodeURIComponent(fmpTicker)}?apikey=${encodeURIComponent(fmpKey)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+
+      if (!Array.isArray(json) || json.length === 0) {
+        bar.innerHTML = `<div class="s-price-no-key">株価データが見つかりませんでした（${esc(fmpTicker)}）</div>`;
+        return;
+      }
+
+      const q = json[0];
+      const price = q.price;
+      const change = q.change;
+      const pct = q.changesPercentage;
+      const currency = q.currency || (country === 'JP' ? 'JPY' : 'USD');
+      const low = q.dayLow;
+      const high = q.dayHigh;
+      const vol = q.volume;
+      const prevClose = q.previousClose;
+      const time = q.timestamp ? new Date(q.timestamp * 1000).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '';
+
+      const changeClass = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+      const changeSign = change > 0 ? '+' : '';
+
+      const priceStr = currency === 'JPY'
+        ? price.toLocaleString('ja-JP', { maximumFractionDigits: 0 })
+        : price.toFixed(2);
+
+      const currencyLabel = currency === 'JPY' ? '円' : currency;
+
+      bar.innerHTML = `
+        <div class="s-price-main">
+          <div class="s-price-value">${esc(priceStr)}</div>
+          <div class="s-price-currency">${esc(currencyLabel)}</div>
+          <div class="s-price-change ${changeClass}">${changeSign}${esc(change?.toFixed(currency === 'JPY' ? 0 : 2))} (${changeSign}${esc(pct?.toFixed(2))}%)</div>
+        </div>
+        <div class="s-price-meta">
+          ${prevClose != null ? `<div class="s-price-meta-item">前日終値<span>${currency === 'JPY' ? prevClose.toLocaleString() : prevClose.toFixed(2)}</span></div>` : ''}
+          ${low != null && high != null ? `<div class="s-price-meta-item">日中レンジ<span>${currency === 'JPY' ? low.toLocaleString() : low.toFixed(2)} – ${currency === 'JPY' ? high.toLocaleString() : high.toFixed(2)}</span></div>` : ''}
+          ${vol != null ? `<div class="s-price-meta-item">出来高<span>${(vol / 1000).toFixed(0)}K</span></div>` : ''}
+          ${time ? `<div class="s-price-meta-item">取得<span>${time}</span></div>` : ''}
+        </div>
+        <div class="s-price-live">LIVE</div>`;
+    } catch (e) {
+      bar.innerHTML = `<div class="s-price-no-key">株価取得エラー: ${esc(e.message)}</div>`;
+    }
   }
 
   function toggleMetric(key) {
