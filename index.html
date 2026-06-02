@@ -747,18 +747,23 @@
   <div class="s-settings-panel" id="settings-panel">
     <div class="s-settings-row">
       <span class="s-settings-label">ANTHROPIC</span>
-      <input type="password" class="s-api-input" id="api-key-input" placeholder="sk-ant-..." />
+      <input type="password" class="s-api-input" id="api-key-input" placeholder="sk-ant-...（AI分析）" />
     </div>
     <div class="s-settings-row" style="margin-top:8px">
       <span class="s-settings-label">AV KEY</span>
-      <input type="password" class="s-api-input" id="fmp-key-input" placeholder="Alpha Vantage API キー（株価用）" />
+      <input type="password" class="s-api-input" id="av-key-input" placeholder="Alpha Vantage キー（株価専用）" />
+    </div>
+    <div class="s-settings-row" style="margin-top:8px">
+      <span class="s-settings-label">FMP KEY</span>
+      <input type="password" class="s-api-input" id="fmp-key-input" placeholder="Financial Modeling Prep キー（財務指標）" />
     </div>
     <div style="margin-top:10px">
       <button class="s-save-btn" onclick="saveAllKeys()">保存</button>
     </div>
     <div class="s-settings-hint">
-      Anthropic: 財務指標AI分析 · Alpha Vantage: リアルタイム株価（<a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener" style="color:var(--accent)">無料取得</a> · 日本株・米国株対応 · 25回/日）<br>
-      両キーはこのブラウザのローカルストレージにのみ保存されます
+      AV: 株価のみ（<a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener" style="color:var(--accent)">無料取得</a> · 25回/日）
+      · FMP: 財務指標・業績履歴（<a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener" style="color:var(--accent)">無料取得</a> · 250回/日 · 日米対応）<br>
+      全キーはブラウザのローカルストレージにのみ保存されます
     </div>
   </div>
 
@@ -795,7 +800,8 @@
   <script>
   // ===== Constants =====
   const API_KEY_STORAGE = 'stock_anthropic_key';
-  const AV_KEY_STORAGE = 'stock_av_key';
+  const AV_KEY_STORAGE  = 'stock_av_key';
+  const FMP_KEY_STORAGE = 'stock_fmp_key';
 
   const METRIC_DEFS = {
     per: {
@@ -942,7 +948,9 @@
     const saved = localStorage.getItem(API_KEY_STORAGE);
     if (saved) document.getElementById('api-key-input').value = saved;
     const avSaved = localStorage.getItem(AV_KEY_STORAGE);
-    if (avSaved) document.getElementById('fmp-key-input').value = avSaved;
+    if (avSaved) document.getElementById('av-key-input').value = avSaved;
+    const fmpSaved = localStorage.getItem(FMP_KEY_STORAGE);
+    if (fmpSaved) document.getElementById('fmp-key-input').value = fmpSaved;
   });
 
   // ===== Settings =====
@@ -953,9 +961,11 @@
 
   function saveAllKeys() {
     const ant = document.getElementById('api-key-input').value.trim();
+    const av  = document.getElementById('av-key-input').value.trim();
     const fmp = document.getElementById('fmp-key-input').value.trim();
     if (ant) localStorage.setItem(API_KEY_STORAGE, ant);
-    if (fmp) localStorage.setItem(AV_KEY_STORAGE, fmp);
+    if (av)  localStorage.setItem(AV_KEY_STORAGE,  av);
+    if (fmp) localStorage.setItem(FMP_KEY_STORAGE, fmp);
     toggleSettings();
   }
 
@@ -1328,107 +1338,127 @@ Use your training data for approximate figures. All values are estimates for edu
   }
 
   async function loadRealDataUS(ticker, avKey, histSection) {
-    const symbol = buildAVSymbol(ticker, 'US');
+    const fmpKey = localStorage.getItem(FMP_KEY_STORAGE);
+    if (fmpKey) {
+      // Prefer FMP for US too (richer history, no AV call waste)
+      try {
+        const [ratiosRes, incRes, cfRes, bsRes] = await Promise.allSettled([
+          fetchFMP(`ratios-ttm/${ticker}`, fmpKey),
+          fetchFMP(`income-statement/${ticker}?period=annual&limit=15`, fmpKey),
+          fetchFMP(`cash-flow-statement/${ticker}?period=annual&limit=15`, fmpKey),
+          fetchFMP(`balance-sheet-statement/${ticker}?period=annual&limit=1`, fmpKey),
+        ]);
+        if (ratiosRes.status === 'fulfilled' && Array.isArray(ratiosRes.value) && ratiosRes.value[0]) {
+          const bs0 = (bsRes.status === 'fulfilled' && Array.isArray(bsRes.value)) ? bsRes.value[0] : null;
+          applyFMPRatios(ratiosRes.value[0], bs0);
+        }
+        const incData = (incRes.status === 'fulfilled' && Array.isArray(incRes.value)) ? incRes.value : null;
+        const cfData  = (cfRes.status  === 'fulfilled' && Array.isArray(cfRes.value))  ? cfRes.value  : null;
+        if (incData?.length || cfData?.length) { renderHistoryFMP(incData, cfData, histSection); return; }
+      } catch (_) {}
+    }
+    // Fallback: Alpha Vantage
+    if (!avKey) { if (histSection) histSection.innerHTML = `<div class="s-hist-na">FMPまたはAVキーを設定すると実績データが表示されます。</div>`; return; }
     try {
       const [ovRes, incRes, cfRes] = await Promise.allSettled([
-        fetchAV('COMPANY_OVERVIEW', symbol, avKey),
-        fetchAV('INCOME_STATEMENT', symbol, avKey),
-        fetchAV('CASH_FLOW', symbol, avKey),
+        fetchAV('COMPANY_OVERVIEW', ticker, avKey),
+        fetchAV('INCOME_STATEMENT', ticker, avKey),
+        fetchAV('CASH_FLOW', ticker, avKey),
       ]);
       if (ovRes.status === 'fulfilled' && ovRes.value?.['Symbol']) applyRealMetrics(ovRes.value);
       const incData = incRes.status === 'fulfilled' ? incRes.value : null;
       const cfData  = cfRes.status  === 'fulfilled' ? cfRes.value  : null;
-      if (incData || cfData) {
-        renderHistory(incData, cfData, histSection);
-      } else {
-        if (histSection) histSection.innerHTML = `<div class="s-hist-na">履歴データを取得できませんでした（API制限 25回/日）。</div>`;
-      }
+      if (incData || cfData) { renderHistory(incData, cfData, histSection); }
+      else { if (histSection) histSection.innerHTML = `<div class="s-hist-na">履歴データを取得できませんでした（API制限 25回/日）。</div>`; }
     } catch (e) {
       if (histSection) histSection.innerHTML = `<div class="s-hist-na">実績データ取得エラー: ${esc(e.message)}</div>`;
     }
   }
 
   async function loadRealDataJP(ticker, histSection) {
+    const fmpKey = localStorage.getItem(FMP_KEY_STORAGE);
+    if (!fmpKey) {
+      if (histSection) histSection.innerHTML = `<div class="s-hist-na">日本株の財務実績を表示するには ⚙ 設定 から <a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener" style="color:var(--accent)">FMP APIキー</a>（無料・250回/日）を登録してください。</div>`;
+      return;
+    }
+
     const symbol = ticker.replace(/\.(T|TYO|JP)$/i, '') + '.T';
-    const modules = 'financialData,defaultKeyStatistics,balanceSheetHistoryAnnual,incomeStatementHistoryAnnual,cashflowStatementHistoryAnnual';
-    const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&lang=en&region=JP`;
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
 
     try {
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const result = json?.quoteSummary?.result?.[0];
-      if (!result) throw new Error('データが見つかりません');
+      const [ratiosRes, incRes, cfRes, bsRes] = await Promise.allSettled([
+        fetchFMP(`ratios-ttm/${symbol}`, fmpKey),
+        fetchFMP(`income-statement/${symbol}?period=annual&limit=15`, fmpKey),
+        fetchFMP(`cash-flow-statement/${symbol}?period=annual&limit=15`, fmpKey),
+        fetchFMP(`balance-sheet-statement/${symbol}?period=annual&limit=1`, fmpKey),
+      ]);
 
-      applyYahooMetrics(result);
-      renderHistoryYahoo(result, histSection);
+      if (ratiosRes.status === 'fulfilled' && Array.isArray(ratiosRes.value) && ratiosRes.value[0]) {
+        const bs0 = (bsRes.status === 'fulfilled' && Array.isArray(bsRes.value)) ? bsRes.value[0] : null;
+        applyFMPRatios(ratiosRes.value[0], bs0);
+      }
+
+      const incData = (incRes.status === 'fulfilled' && Array.isArray(incRes.value)) ? incRes.value : null;
+      const cfData  = (cfRes.status  === 'fulfilled' && Array.isArray(cfRes.value))  ? cfRes.value  : null;
+
+      if (incData?.length || cfData?.length) {
+        renderHistoryFMP(incData, cfData, histSection);
+      } else {
+        const errMsg = [incRes, cfRes].find(r => r.status === 'rejected')?.reason?.message || '—';
+        if (histSection) histSection.innerHTML = `<div class="s-hist-na">履歴データを取得できませんでした（${esc(errMsg)}）。FMPの無料プランで日本株の財務諸表が利用できない場合があります。</div>`;
+      }
     } catch (e) {
-      if (histSection) histSection.innerHTML = `<div class="s-hist-na">Yahoo Finance取得エラー: ${esc(e.message)}。上記の財務指標はAI推定値です。</div>`;
+      if (histSection) histSection.innerHTML = `<div class="s-hist-na">FMP取得エラー: ${esc(e.message)}</div>`;
     }
   }
 
-  function applyYahooMetrics(result) {
-    const fd = result.financialData        || {};
-    const ks = result.defaultKeyStatistics || {};
-    const bsArr = result.balanceSheetHistoryAnnual?.balanceSheetStatements || [];
-    const bs0 = bsArr[0] || {};
-    const raw = (obj, key) => { const v = obj[key]?.raw; return (v != null && !isNaN(v)) ? v : null; };
+  async function fetchFMP(path, apiKey) {
+    const sep = path.includes('?') ? '&' : '?';
+    const url = `https://financialmodelingprep.com/api/v3/${path}${sep}apikey=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json['Error Message']) throw new Error(json['Error Message']);
+    return json;
+  }
 
-    const totalAssets = raw(bs0, 'totalAssets');
-    const equity      = raw(bs0, 'totalStockholderEquity');
-    const equityRatio = (totalAssets && equity && totalAssets > 0) ? (equity / totalAssets * 100) : null;
+  function applyFMPRatios(r, bs) {
+    const pf = v => (v != null && !isNaN(Number(v)) && Number(v) !== 0) ? Number(v) : null;
 
-    const marketCapRaw = raw(ks, 'marketCap');
-    const revenueRaw   = raw(fd, 'totalRevenue');
+    let equityRatio = null;
+    if (bs?.totalAssets && bs?.totalStockholdersEquity) {
+      equityRatio = (bs.totalStockholdersEquity / bs.totalAssets) * 100;
+    }
 
-    const metrics = {
-      per:              raw(ks, 'trailingPE') ?? raw(ks, 'forwardPE'),
-      pbr:              raw(ks, 'priceToBook'),
-      roe:              raw(fd, 'returnOnEquity')  != null ? raw(fd, 'returnOnEquity')  * 100 : null,
-      roa:              raw(fd, 'returnOnAssets')  != null ? raw(fd, 'returnOnAssets')  * 100 : null,
-      equity_ratio:     equityRatio,
-      operating_margin: raw(fd, 'operatingMargins') != null ? raw(fd, 'operatingMargins') * 100 : null,
-      dividend_yield:   raw(ks, 'dividendYield')   != null ? raw(ks, 'dividendYield')   * 100 : null,
-      market_cap:       marketCapRaw != null ? Math.round(marketCapRaw / 1e8) : null,   // 億円
-      revenue:          revenueRaw   != null ? Math.round(revenueRaw   / 1e8) : null,   // 億円
+    const mapping = {
+      per:              { value: pf(r.peRatioTTM),                                                       unit: '倍' },
+      pbr:              { value: pf(r.priceToBookRatioTTM),                                               unit: '倍' },
+      roe:              { value: pf(r.returnOnEquityTTM)        != null ? pf(r.returnOnEquityTTM)        * 100 : null, unit: '%' },
+      roa:              { value: pf(r.returnOnAssetsTTM)        != null ? pf(r.returnOnAssetsTTM)        * 100 : null, unit: '%' },
+      equity_ratio:     { value: equityRatio,                                                              unit: '%' },
+      operating_margin: { value: pf(r.operatingProfitMarginTTM) != null ? pf(r.operatingProfitMarginTTM) * 100 : null, unit: '%' },
+      dividend_yield:   { value: pf(r.dividendYieldTTM)         != null ? pf(r.dividendYieldTTM)         * 100 : null, unit: '%' },
     };
 
-    for (const [key, value] of Object.entries(metrics)) {
-      if (value == null || isNaN(value)) continue;
-      const unit = (key === 'market_cap' || key === 'revenue') ? '億円' : METRIC_DEFS[key]?.unit || '';
-      updateMetricCard(key, value, unit, 'Yahoo Finance');
+    for (const [key, d] of Object.entries(mapping)) {
+      if (d.value == null || isNaN(d.value)) continue;
+      updateMetricCard(key, d.value, d.unit, 'FMP');
     }
   }
 
-  function renderHistoryYahoo(result, section) {
-    if (!section) return;
-    section.innerHTML = '';
+  function renderHistoryFMP(incomeList, cfList, section) {
+    const toMap = (arr, dateKey, fn) => {
+      const m = {};
+      (arr || []).forEach(r => { const y = (r[dateKey] || '').substring(0, 4); if (y) m[y] = fn(r); });
+      return m;
+    };
 
-    const incStmts = result.incomeStatementHistoryAnnual?.incomeStatementHistory || [];
-    const cfStmts  = result.cashflowStatementHistoryAnnual?.cashflowStatements   || [];
+    const incomeMap = toMap(incomeList, 'date', r => ({ revenue: r.revenue ?? null, netIncome: r.netIncome ?? null }));
+    const cfMap     = toMap(cfList,    'date', r => ({ dividends: r.dividendsPaid != null ? Math.abs(r.dividendsPaid) : null }));
 
-    const incomeMap = {};
-    incStmts.forEach(s => {
-      const yr = new Date((s.endDate?.raw || 0) * 1000).getFullYear().toString();
-      incomeMap[yr] = {
-        revenue:   s.totalRevenue?.raw  ?? null,
-        netIncome: s.netIncome?.raw     ?? null,
-      };
-    });
+    const fakeInc = { annualReports: Object.entries(incomeMap).map(([y, v]) => ({ fiscalDateEnding: y + '-12-31', totalRevenue: v.revenue, netIncome: v.netIncome, operatingIncome: null })) };
+    const fakeCf  = { annualReports: Object.entries(cfMap).map(([y, v])    => ({ fiscalDateEnding: y + '-12-31', dividendPayout: v.dividends })) };
 
-    const cfMap = {};
-    cfStmts.forEach(s => {
-      const yr = new Date((s.endDate?.raw || 0) * 1000).getFullYear().toString();
-      const dp = s.dividendsPaid?.raw;
-      cfMap[yr] = { dividends: dp != null ? Math.abs(dp) : null };
-    });
-
-    // Yahoo Finance gives only ~4 years, but use same renderer
-    const fakeIncData  = { annualReports: Object.entries(incomeMap).map(([y, v]) => ({ fiscalDateEnding: y + '-12-31', totalRevenue: v.revenue, netIncome: v.netIncome, operatingIncome: null })) };
-    const fakeCfData   = { annualReports: Object.entries(cfMap).map(([y, v]) => ({ fiscalDateEnding: y + '-12-31', dividendPayout: v.dividends })) };
-
-    renderHistory(fakeIncData, fakeCfData, section, '業績・配当性向推移（Yahoo Finance · 直近4期）');
+    renderHistory(fakeInc, fakeCf, section, '業績・配当性向推移（FMP · 最大15年）');
   }
 
   // ===== Apply real metrics from COMPANY_OVERVIEW =====
