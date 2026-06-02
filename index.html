@@ -1215,17 +1215,14 @@ Use your training data for approximate figures. All values are estimates for edu
     // History placeholder (populated by loadRealData)
     const histSection = document.createElement('div');
     histSection.id = 'history-section';
-    const avKey = localStorage.getItem(AV_KEY_STORAGE);
-    if (avKey) {
-      histSection.innerHTML = `<div class="s-hist-loading"><div class="s-spinner" style="width:14px;height:14px;border-width:2px"></div> 実績データを取得中...</div>`;
-    }
+    histSection.innerHTML = `<div class="s-hist-loading"><div class="s-spinner" style="width:14px;height:14px;border-width:2px"></div> 実績データを取得中...</div>`;
     area.appendChild(histSection);
 
     area.classList.remove('hidden');
 
-    // Load real data from Alpha Vantage (non-blocking)
+    // Load real data (non-blocking)
     const avKey2 = localStorage.getItem(AV_KEY_STORAGE);
-    if (avKey2) loadRealData(data.ticker, data.country, avKey2);
+    loadRealData(data.ticker, data.country, avKey2 || '');
   }
 
   // ===== Live Price (Alpha Vantage) =====
@@ -1318,35 +1315,120 @@ Use your training data for approximate figures. All values are estimates for edu
     const histSection = document.getElementById('history-section');
 
     if (country === 'JP') {
-      if (histSection) histSection.innerHTML = `<div class="s-hist-na">⚠ 日本株の財務実績データはAlpha Vantageの無料プランでは対応していません。上記の財務指標はAI推定値です。</div>`;
-      return;
+      // JP: Yahoo Finance (via CORS proxy) for fundamentals + history
+      await loadRealDataJP(ticker, histSection);
+    } else {
+      // US: Alpha Vantage for fundamentals + history
+      if (!avKey) {
+        if (histSection) histSection.innerHTML = `<div class="s-hist-na">Alpha Vantage APIキーを設定すると実績データが表示されます。</div>`;
+        return;
+      }
+      await loadRealDataUS(ticker, avKey, histSection);
     }
+  }
 
-    const symbol = buildAVSymbol(ticker, country);
-
+  async function loadRealDataUS(ticker, avKey, histSection) {
+    const symbol = buildAVSymbol(ticker, 'US');
     try {
-      // Fetch COMPANY_OVERVIEW + INCOME_STATEMENT + CASH_FLOW in parallel
       const [ovRes, incRes, cfRes] = await Promise.allSettled([
         fetchAV('COMPANY_OVERVIEW', symbol, avKey),
         fetchAV('INCOME_STATEMENT', symbol, avKey),
         fetchAV('CASH_FLOW', symbol, avKey),
       ]);
-
-      if (ovRes.status === 'fulfilled' && ovRes.value?.['Symbol']) {
-        applyRealMetrics(ovRes.value);
-      }
-
+      if (ovRes.status === 'fulfilled' && ovRes.value?.['Symbol']) applyRealMetrics(ovRes.value);
       const incData = incRes.status === 'fulfilled' ? incRes.value : null;
       const cfData  = cfRes.status  === 'fulfilled' ? cfRes.value  : null;
-
       if (incData || cfData) {
         renderHistory(incData, cfData, histSection);
       } else {
-        if (histSection) histSection.innerHTML = `<div class="s-hist-na">履歴データを取得できませんでした。API制限の可能性があります（25回/日）。</div>`;
+        if (histSection) histSection.innerHTML = `<div class="s-hist-na">履歴データを取得できませんでした（API制限 25回/日）。</div>`;
       }
     } catch (e) {
       if (histSection) histSection.innerHTML = `<div class="s-hist-na">実績データ取得エラー: ${esc(e.message)}</div>`;
     }
+  }
+
+  async function loadRealDataJP(ticker, histSection) {
+    const symbol = ticker.replace(/\.(T|TYO|JP)$/i, '') + '.T';
+    const modules = 'financialData,defaultKeyStatistics,balanceSheetHistoryAnnual,incomeStatementHistoryAnnual,cashflowStatementHistoryAnnual';
+    const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&lang=en&region=JP`;
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
+
+    try {
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const result = json?.quoteSummary?.result?.[0];
+      if (!result) throw new Error('データが見つかりません');
+
+      applyYahooMetrics(result);
+      renderHistoryYahoo(result, histSection);
+    } catch (e) {
+      if (histSection) histSection.innerHTML = `<div class="s-hist-na">Yahoo Finance取得エラー: ${esc(e.message)}。上記の財務指標はAI推定値です。</div>`;
+    }
+  }
+
+  function applyYahooMetrics(result) {
+    const fd = result.financialData        || {};
+    const ks = result.defaultKeyStatistics || {};
+    const bsArr = result.balanceSheetHistoryAnnual?.balanceSheetStatements || [];
+    const bs0 = bsArr[0] || {};
+    const raw = (obj, key) => { const v = obj[key]?.raw; return (v != null && !isNaN(v)) ? v : null; };
+
+    const totalAssets = raw(bs0, 'totalAssets');
+    const equity      = raw(bs0, 'totalStockholderEquity');
+    const equityRatio = (totalAssets && equity && totalAssets > 0) ? (equity / totalAssets * 100) : null;
+
+    const marketCapRaw = raw(ks, 'marketCap');
+    const revenueRaw   = raw(fd, 'totalRevenue');
+
+    const metrics = {
+      per:              raw(ks, 'trailingPE') ?? raw(ks, 'forwardPE'),
+      pbr:              raw(ks, 'priceToBook'),
+      roe:              raw(fd, 'returnOnEquity')  != null ? raw(fd, 'returnOnEquity')  * 100 : null,
+      roa:              raw(fd, 'returnOnAssets')  != null ? raw(fd, 'returnOnAssets')  * 100 : null,
+      equity_ratio:     equityRatio,
+      operating_margin: raw(fd, 'operatingMargins') != null ? raw(fd, 'operatingMargins') * 100 : null,
+      dividend_yield:   raw(ks, 'dividendYield')   != null ? raw(ks, 'dividendYield')   * 100 : null,
+      market_cap:       marketCapRaw != null ? Math.round(marketCapRaw / 1e8) : null,   // 億円
+      revenue:          revenueRaw   != null ? Math.round(revenueRaw   / 1e8) : null,   // 億円
+    };
+
+    for (const [key, value] of Object.entries(metrics)) {
+      if (value == null || isNaN(value)) continue;
+      const unit = (key === 'market_cap' || key === 'revenue') ? '億円' : METRIC_DEFS[key]?.unit || '';
+      updateMetricCard(key, value, unit, 'Yahoo Finance');
+    }
+  }
+
+  function renderHistoryYahoo(result, section) {
+    if (!section) return;
+    section.innerHTML = '';
+
+    const incStmts = result.incomeStatementHistoryAnnual?.incomeStatementHistory || [];
+    const cfStmts  = result.cashflowStatementHistoryAnnual?.cashflowStatements   || [];
+
+    const incomeMap = {};
+    incStmts.forEach(s => {
+      const yr = new Date((s.endDate?.raw || 0) * 1000).getFullYear().toString();
+      incomeMap[yr] = {
+        revenue:   s.totalRevenue?.raw  ?? null,
+        netIncome: s.netIncome?.raw     ?? null,
+      };
+    });
+
+    const cfMap = {};
+    cfStmts.forEach(s => {
+      const yr = new Date((s.endDate?.raw || 0) * 1000).getFullYear().toString();
+      const dp = s.dividendsPaid?.raw;
+      cfMap[yr] = { dividends: dp != null ? Math.abs(dp) : null };
+    });
+
+    // Yahoo Finance gives only ~4 years, but use same renderer
+    const fakeIncData  = { annualReports: Object.entries(incomeMap).map(([y, v]) => ({ fiscalDateEnding: y + '-12-31', totalRevenue: v.revenue, netIncome: v.netIncome, operatingIncome: null })) };
+    const fakeCfData   = { annualReports: Object.entries(cfMap).map(([y, v]) => ({ fiscalDateEnding: y + '-12-31', dividendPayout: v.dividends })) };
+
+    renderHistory(fakeIncData, fakeCfData, section, '業績・配当性向推移（Yahoo Finance · 直近4期）');
   }
 
   // ===== Apply real metrics from COMPANY_OVERVIEW =====
@@ -1396,7 +1478,7 @@ Use your training data for approximate figures. All values are estimates for edu
   }
 
   // ===== Render History =====
-  function renderHistory(incData, cfData, section) {
+  function renderHistory(incData, cfData, section, sectionTitle) {
     if (!section) return;
     section.innerHTML = '';
 
@@ -1436,7 +1518,7 @@ Use your training data for approximate figures. All values are estimates for edu
 
     const label = document.createElement('div');
     label.className = 's-section-label';
-    label.textContent = '業績・配当性向推移';
+    label.textContent = sectionTitle || '業績・配当性向推移（Alpha Vantage · 最大15年）';
     section.appendChild(label);
 
     const card = document.createElement('div');
