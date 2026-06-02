@@ -622,6 +622,115 @@
       margin-bottom: 4px;
     }
 
+    /* ===== Source Badge ===== */
+    .s-metric-source {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--gray-dim);
+      color: var(--text3);
+      white-space: nowrap;
+    }
+    .s-metric-source.real {
+      background: var(--green-dim);
+      color: var(--green);
+    }
+
+    /* ===== History Section ===== */
+    .s-hist-loading {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text3);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 0;
+    }
+
+    .s-hist-na {
+      font-size: 12px;
+      color: var(--text3);
+      padding: 12px 0;
+    }
+
+    .s-hist-chart {
+      width: 100%;
+      overflow-x: auto;
+      margin-bottom: 12px;
+    }
+
+    .s-hist-legend {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text2);
+    }
+
+    .s-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .s-legend-bar {
+      display: inline-block;
+      width: 14px;
+      height: 10px;
+      border-radius: 2px;
+      opacity: 0.75;
+    }
+
+    .s-legend-line {
+      display: inline-block;
+      width: 14px;
+      height: 2px;
+      border-radius: 1px;
+    }
+
+    .s-hist-table-wrap {
+      overflow-x: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border2);
+    }
+
+    .s-hist-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    .s-hist-table th {
+      background: var(--surface2);
+      color: var(--text2);
+      font-size: 10px;
+      letter-spacing: 1px;
+      padding: 8px 10px;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .s-hist-table th:first-child { text-align: left; }
+
+    .s-hist-table td {
+      padding: 7px 10px;
+      text-align: right;
+      color: var(--text2);
+      border-bottom: 1px solid var(--border2);
+    }
+
+    .s-hist-table td:first-child { text-align: left; color: var(--text3); }
+    .s-hist-table tr:last-child td { border-bottom: none; }
+    .s-hist-table tr:nth-child(even) td { background: rgba(255,255,255,0.01); }
+
+    .s-hist-table td.good { color: var(--green); }
+    .s-hist-table td.warn { color: var(--yellow); }
+    .s-hist-table td.bad  { color: var(--red); }
+
     /* ===== Hidden ===== */
     .hidden { display: none !important; }
   </style>
@@ -1040,12 +1149,15 @@ Use your training data for approximate figures. All values are estimates for edu
       card.innerHTML = `
         <div class="s-metric-top">
           <div class="s-metric-name">${esc(def.name)} <span class="s-metric-chevron" id="chev-${key}">▼</span></div>
-          ${ratingLabel !== 'N/A' ? `<span class="s-metric-rating ${ratingClass}">${ratingLabel}</span>` : `<span class="s-metric-rating na">参考</span>`}
+          <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            <span class="s-metric-source" id="ms-${key}">AI推定</span>
+            <span class="s-metric-rating ${ratingClass}" id="mr-${key}">${ratingLabel !== 'N/A' ? ratingLabel : '参考'}</span>
+          </div>
         </div>
-        <div class="s-metric-value">
+        <div class="s-metric-value" id="mv-${key}">
           ${esc(dispVal)}<span class="s-metric-unit">${isLarge ? '' : esc(unitDisplay || def.unit)}</span>
         </div>
-        ${asof ? `<div class="s-metric-asof">${esc(asof)}</div>` : ''}
+        <div class="s-metric-asof" id="ma-${key}">${asof ? esc(asof) : ''}</div>
         <div class="s-metric-expand">
           <div class="s-metric-full-name">${esc(def.fullName)}</div>
           <div class="s-metric-desc">${esc(def.desc)}</div>
@@ -1100,7 +1212,20 @@ Use your training data for approximate figures. All values are estimates for edu
       area.appendChild(anaCard);
     }
 
+    // History placeholder (populated by loadRealData)
+    const histSection = document.createElement('div');
+    histSection.id = 'history-section';
+    const avKey = localStorage.getItem(AV_KEY_STORAGE);
+    if (avKey) {
+      histSection.innerHTML = `<div class="s-hist-loading"><div class="s-spinner" style="width:14px;height:14px;border-width:2px"></div> 実績データを取得中...</div>`;
+    }
+    area.appendChild(histSection);
+
     area.classList.remove('hidden');
+
+    // Load real data from Alpha Vantage (non-blocking)
+    const avKey2 = localStorage.getItem(AV_KEY_STORAGE);
+    if (avKey2) loadRealData(data.ticker, data.country, avKey2);
   }
 
   // ===== Live Price (Alpha Vantage) =====
@@ -1114,11 +1239,8 @@ Use your training data for approximate figures. All values are estimates for edu
       return;
     }
 
-    // Build Alpha Vantage symbol: JP → "7203.T", US → "NVDA"
-    let symbol = ticker || '';
-    if (country === 'JP' && /^\d{4}$/.test(symbol)) {
-      symbol = symbol + '.T';
-    }
+    // Build Alpha Vantage symbol
+    let symbol = buildAVSymbol(ticker, country);
 
     try {
       const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(avKey)}`;
@@ -1173,6 +1295,273 @@ Use your training data for approximate figures. All values are estimates for edu
     } catch (e) {
       bar.innerHTML = `<div class="s-price-no-key">株価取得エラー: ${esc(e.message)}</div>`;
     }
+  }
+
+  // ===== Alpha Vantage helpers =====
+  function buildAVSymbol(ticker, country) {
+    let s = (ticker || '').trim().replace(/\.(T|TYO|JP|JT)$/i, '');
+    if (country === 'JP' && /^\d{4,5}$/.test(s)) s = s + '.T';
+    return s;
+  }
+
+  async function fetchAV(func, symbol, avKey) {
+    const url = `https://www.alphavantage.co/query?function=${func}&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(avKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json['Note'] || json['Information']) throw new Error('API制限中（25回/日）');
+    return json;
+  }
+
+  // ===== Load Real Data =====
+  async function loadRealData(ticker, country, avKey) {
+    const histSection = document.getElementById('history-section');
+
+    if (country === 'JP') {
+      if (histSection) histSection.innerHTML = `<div class="s-hist-na">⚠ 日本株の財務実績データはAlpha Vantageの無料プランでは対応していません。上記の財務指標はAI推定値です。</div>`;
+      return;
+    }
+
+    const symbol = buildAVSymbol(ticker, country);
+
+    try {
+      // Fetch COMPANY_OVERVIEW + INCOME_STATEMENT + CASH_FLOW in parallel
+      const [ovRes, incRes, cfRes] = await Promise.allSettled([
+        fetchAV('COMPANY_OVERVIEW', symbol, avKey),
+        fetchAV('INCOME_STATEMENT', symbol, avKey),
+        fetchAV('CASH_FLOW', symbol, avKey),
+      ]);
+
+      if (ovRes.status === 'fulfilled' && ovRes.value?.['Symbol']) {
+        applyRealMetrics(ovRes.value);
+      }
+
+      const incData = incRes.status === 'fulfilled' ? incRes.value : null;
+      const cfData  = cfRes.status  === 'fulfilled' ? cfRes.value  : null;
+
+      if (incData || cfData) {
+        renderHistory(incData, cfData, histSection);
+      } else {
+        if (histSection) histSection.innerHTML = `<div class="s-hist-na">履歴データを取得できませんでした。API制限の可能性があります（25回/日）。</div>`;
+      }
+    } catch (e) {
+      if (histSection) histSection.innerHTML = `<div class="s-hist-na">実績データ取得エラー: ${esc(e.message)}</div>`;
+    }
+  }
+
+  // ===== Apply real metrics from COMPANY_OVERVIEW =====
+  function applyRealMetrics(ov) {
+    const pf = s => { const v = parseFloat(s); return isNaN(v) ? null : v; };
+    const mapping = {
+      per:              { value: pf(ov['PERatio']),                         unit: '倍',    asof: 'TTM' },
+      pbr:              { value: pf(ov['PriceToBookRatio']),                 unit: '倍',    asof: 'TTM' },
+      roe:              { value: pf(ov['ReturnOnEquityTTM'])     != null ? pf(ov['ReturnOnEquityTTM'])     * 100 : null, unit: '%', asof: 'TTM' },
+      roa:              { value: pf(ov['ReturnOnAssetsTTM'])     != null ? pf(ov['ReturnOnAssetsTTM'])     * 100 : null, unit: '%', asof: 'TTM' },
+      operating_margin: { value: pf(ov['OperatingMarginTTM'])    != null ? pf(ov['OperatingMarginTTM'])    * 100 : null, unit: '%', asof: 'TTM' },
+      dividend_yield:   { value: pf(ov['DividendYield'])         != null ? pf(ov['DividendYield'])         * 100 : null, unit: '%', asof: '直近' },
+      market_cap:       { value: pf(ov['MarketCapitalization'])  != null ? Math.round(pf(ov['MarketCapitalization'])  / 1e6) : null, unit: '百万ドル', asof: '現在' },
+      revenue:          { value: pf(ov['RevenueTTM'])            != null ? Math.round(pf(ov['RevenueTTM'])            / 1e6) : null, unit: '百万ドル', asof: 'TTM'  },
+    };
+    for (const [key, d] of Object.entries(mapping)) {
+      if (d.value == null || isNaN(d.value)) continue;
+      updateMetricCard(key, d.value, d.unit, d.asof);
+    }
+  }
+
+  function updateMetricCard(key, value, unit, asof) {
+    const def = METRIC_DEFS[key];
+    if (!def) return;
+    const valEl    = document.getElementById(`mv-${key}`);
+    const asofEl   = document.getElementById(`ma-${key}`);
+    const ratingEl = document.getElementById(`mr-${key}`);
+    const sourceEl = document.getElementById(`ms-${key}`);
+    const card     = document.querySelector(`[data-key="${key}"]`);
+    if (!valEl) return;
+
+    const dispVal = def.formatVal ? def.formatVal(value, unit) : value.toFixed(2);
+    const dispUnit = def.getUnit ? def.getUnit(unit) : (def.unit || unit);
+    const isLarge = (key === 'market_cap' || key === 'revenue') && dispVal !== 'N/A' &&
+      (dispVal.includes('兆') || dispVal.includes('T') || dispVal.includes('B'));
+
+    valEl.innerHTML = `${esc(dispVal)}<span class="s-metric-unit">${isLarge ? '' : esc(dispUnit)}</span>`;
+    if (asofEl) asofEl.textContent = asof || '';
+
+    let rc = 'na', rl = '参考';
+    if (def.isGood(value))      { rc = 'good'; rl = '優良'; }
+    else if (def.isWarn(value)) { rc = 'warn'; rl = '標準'; }
+    else if (def.isBad(value))  { rc = 'bad';  rl = '注意'; }
+    if (ratingEl) { ratingEl.className = `s-metric-rating ${rc}`; ratingEl.textContent = rl; }
+    if (card) card.className = card.className.replace(/rating-\w+/, `rating-${rc}`);
+    if (sourceEl) { sourceEl.textContent = '実データ'; sourceEl.className = 's-metric-source real'; }
+  }
+
+  // ===== Render History =====
+  function renderHistory(incData, cfData, section) {
+    if (!section) return;
+    section.innerHTML = '';
+
+    const incomeMap = {};
+    ((incData?.annualReports) || []).forEach(r => {
+      const yr = r.fiscalDateEnding?.substring(0, 4);
+      if (!yr) return;
+      incomeMap[yr] = {
+        revenue:    parseFloat(r.totalRevenue)    || null,
+        netIncome:  parseFloat(r.netIncome)       || null,
+        opIncome:   parseFloat(r.operatingIncome) || null,
+      };
+    });
+
+    const cfMap = {};
+    ((cfData?.annualReports) || []).forEach(r => {
+      const yr = r.fiscalDateEnding?.substring(0, 4);
+      if (!yr) return;
+      cfMap[yr] = { dividends: Math.abs(parseFloat(r.dividendPayout)) || null };
+    });
+
+    const allYears = [...new Set([...Object.keys(incomeMap), ...Object.keys(cfMap)])]
+      .filter(y => /^\d{4}$/.test(y)).sort().slice(-15);
+
+    if (allYears.length === 0) {
+      section.innerHTML = `<div class="s-hist-na">履歴データが見つかりませんでした</div>`;
+      return;
+    }
+
+    const revenues   = allYears.map(y => incomeMap[y]?.revenue   ?? null);
+    const netIncomes = allYears.map(y => incomeMap[y]?.netIncome  ?? null);
+    const dividends  = allYears.map(y => cfMap[y]?.dividends      ?? null);
+    const payouts    = allYears.map((_, i) => {
+      const d = dividends[i], n = netIncomes[i];
+      return (d != null && n != null && n > 0) ? Math.min((d / n) * 100, 300) : null;
+    });
+
+    const label = document.createElement('div');
+    label.className = 's-section-label';
+    label.textContent = '業績・配当性向推移';
+    section.appendChild(label);
+
+    const card = document.createElement('div');
+    card.className = 's-analysis-card';
+
+    // Chart
+    const chartDiv = document.createElement('div');
+    chartDiv.className = 's-hist-chart';
+    card.appendChild(chartDiv);
+    chartDiv.innerHTML = buildSVGChart(allYears, netIncomes, payouts);
+
+    // Legend
+    const leg = document.createElement('div');
+    leg.className = 's-hist-legend';
+    leg.innerHTML = `
+      <span class="s-legend-item"><span class="s-legend-bar" style="background:#58a6ff"></span>純利益</span>
+      <span class="s-legend-item"><span class="s-legend-line" style="background:#d29922;height:2px"></span>配当性向%</span>`;
+    card.appendChild(leg);
+
+    // Table
+    const fmtV = v => {
+      if (v == null) return '—';
+      const abs = Math.abs(v);
+      if (abs >= 1e12) return `${(v/1e12).toFixed(2)}T`;
+      if (abs >= 1e9)  return `${(v/1e9).toFixed(1)}B`;
+      if (abs >= 1e6)  return `${(v/1e6).toFixed(0)}M`;
+      return v.toLocaleString();
+    };
+    const fmtP = v => v == null ? '—' : `${v.toFixed(1)}%`;
+
+    const wrap = document.createElement('div');
+    wrap.className = 's-hist-table-wrap';
+
+    let html = `<table class="s-hist-table">
+      <thead><tr>
+        <th>年度</th><th>売上高</th><th>純利益</th><th>総配当</th><th>配当性向</th>
+      </tr></thead><tbody>`;
+
+    [...allYears].reverse().forEach((yr, ri) => {
+      const i = allYears.length - 1 - ri;
+      const p = payouts[i];
+      const pc = p == null ? '' : p > 100 ? 'bad' : p > 60 ? 'warn' : p > 0 ? 'good' : '';
+      html += `<tr>
+        <td>${yr}</td>
+        <td>${fmtV(revenues[i])}</td>
+        <td>${fmtV(netIncomes[i])}</td>
+        <td>${fmtV(dividends[i])}</td>
+        <td class="${pc}">${fmtP(p)}</td>
+      </tr>`;
+    });
+
+    html += `</tbody></table>`;
+    wrap.innerHTML = html;
+    card.appendChild(wrap);
+    section.appendChild(card);
+  }
+
+  // ===== SVG Chart =====
+  function buildSVGChart(years, netIncomes, payouts) {
+    const W = 700, H = 210;
+    const pL = 52, pR = 52, pT = 12, pB = 32;
+    const cW = W - pL - pR, cH = H - pT - pB;
+    const n = years.length;
+
+    const validInc = netIncomes.filter(v => v != null && v > 0);
+    const maxInc = validInc.length ? Math.max(...validInc) : 1;
+    const validPay = payouts.filter(v => v != null);
+    const maxPay = validPay.length ? Math.max(100, Math.max(...validPay)) : 100;
+    const barW = Math.max(6, Math.min(30, cW / n * 0.55));
+
+    let bars = '', lines = '', dots = '', xLbls = '', yL = '', yR = '';
+
+    years.forEach((yr, i) => {
+      const cx = pL + (i + 0.5) * (cW / n);
+
+      if (netIncomes[i] != null && netIncomes[i] > 0) {
+        const bh = Math.max(2, (netIncomes[i] / maxInc) * cH);
+        bars += `<rect x="${(cx - barW/2).toFixed(1)}" y="${(pT + cH - bh).toFixed(1)}" width="${barW}" height="${bh.toFixed(1)}" fill="#58a6ff" fill-opacity="0.75" rx="2"/>`;
+      }
+
+      if (payouts[i] != null) {
+        const py = pT + cH - (Math.min(payouts[i], maxPay) / maxPay) * cH;
+        let pi = i - 1;
+        while (pi >= 0 && payouts[pi] == null) pi--;
+        if (pi >= 0) {
+          const px = pL + (pi + 0.5) * (cW / n);
+          const ppy = pT + cH - (Math.min(payouts[pi], maxPay) / maxPay) * cH;
+          lines += `<line x1="${px.toFixed(1)}" y1="${ppy.toFixed(1)}" x2="${cx.toFixed(1)}" y2="${py.toFixed(1)}" stroke="#d29922" stroke-width="2.5" stroke-opacity="0.9"/>`;
+        }
+        dots += `<circle cx="${cx.toFixed(1)}" cy="${py.toFixed(1)}" r="3.5" fill="#d29922" stroke="#0d1117" stroke-width="1"/>`;
+      }
+
+      if (n <= 8 || i % Math.ceil(n / 8) === 0 || i === n - 1) {
+        xLbls += `<text x="${cx.toFixed(1)}" y="${H - pB + 14}" text-anchor="middle" font-size="9" fill="#6e7681">${yr}</text>`;
+      }
+    });
+
+    for (let j = 0; j <= 4; j++) {
+      const v = maxInc * j / 4;
+      const y = (pT + cH - j / 4 * cH).toFixed(1);
+      const lbl = v >= 1e12 ? `${(v/1e12).toFixed(1)}T` : v >= 1e9 ? `${(v/1e9).toFixed(0)}B` : v >= 1e6 ? `${(v/1e6).toFixed(0)}M` : '0';
+      yL += `<text x="${pL - 4}" y="${(+y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="#6e7681">${lbl}</text>`;
+    }
+
+    [0, 25, 50, 75, 100].forEach(pct => {
+      const y = pT + cH - (pct / maxPay) * cH;
+      if (y < pT || y > pT + cH + 2) return;
+      yR += `<text x="${W - pR + 4}" y="${(y + 3).toFixed(1)}" text-anchor="start" font-size="9" fill="#d29922">${pct}%</text>`;
+    });
+
+    let grid = '';
+    for (let j = 0; j <= 4; j++) {
+      const y = (pT + j / 4 * cH).toFixed(1);
+      grid += `<line x1="${pL}" y1="${y}" x2="${W - pR}" y2="${y}" stroke="#21262d" stroke-width="1"/>`;
+    }
+
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:320px">
+      <defs><clipPath id="cc"><rect x="${pL}" y="${pT}" width="${cW}" height="${cH}"/></clipPath></defs>
+      ${grid}
+      <g clip-path="url(#cc)">${bars}${lines}${dots}</g>
+      <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${pT + cH}" stroke="#30363d"/>
+      <line x1="${pL}" y1="${pT + cH}" x2="${W - pR}" y2="${pT + cH}" stroke="#30363d"/>
+      <line x1="${W - pR}" y1="${pT}" x2="${W - pR}" y2="${pT + cH}" stroke="#30363d" stroke-dasharray="3,3" stroke-opacity="0.5"/>
+      ${xLbls}${yL}${yR}
+    </svg>`;
   }
 
   function toggleMetric(key) {
