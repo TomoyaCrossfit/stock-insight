@@ -760,11 +760,32 @@
     <div style="margin-top:10px">
       <button class="s-save-btn" onclick="saveAllKeys()">保存</button>
     </div>
-    <div class="s-settings-hint">
+    <div class="s-settings-hint" style="margin-top:6px">
       AV: 株価のみ（<a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener" style="color:var(--accent)">無料取得</a> · 25回/日）
-      · FMP: 財務指標・業績履歴（<a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener" style="color:var(--accent)">無料取得</a> · 250回/日 · 日米対応）<br>
-      全キーはブラウザのローカルストレージにのみ保存されます
+      · FMP: 米国株財務指標（<a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener" style="color:var(--accent)">無料取得</a> · 250回/日）
     </div>
+    <div style="border-top:1px solid var(--border2);margin:14px 0 10px;padding-top:12px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:2px;margin-bottom:10px">
+        J-QUANTS — 日本株財務データ（JPX公式・無料）
+      </div>
+      <div class="s-settings-row">
+        <span class="s-settings-label">EMAIL</span>
+        <input type="email" class="s-api-input" id="jq-email" placeholder="登録メールアドレス" />
+      </div>
+      <div class="s-settings-row" style="margin-top:8px">
+        <span class="s-settings-label">PASS</span>
+        <input type="password" class="s-api-input" id="jq-pass" placeholder="パスワード（保存されません）" />
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button class="s-save-btn" onclick="loginJQuants()">J-Quants ログイン</button>
+        <span id="jq-status" style="font-size:11px;font-family:'JetBrains Mono',monospace"></span>
+      </div>
+      <div class="s-settings-hint" style="margin-top:6px">
+        <a href="https://jpx-jquants.com/" target="_blank" rel="noopener" style="color:var(--accent)">jpx-jquants.com</a>
+        で無料登録 → このフォームでログイン → 認証トークンのみ保存（パスワードは保存しません）
+      </div>
+    </div>
+    <div class="s-settings-hint">全キーはブラウザのローカルストレージにのみ保存されます</div>
   </div>
 
   <!-- ===== Main ===== -->
@@ -799,9 +820,18 @@
 
   <script>
   // ===== Constants =====
-  const API_KEY_STORAGE = 'stock_anthropic_key';
-  const AV_KEY_STORAGE  = 'stock_av_key';
-  const FMP_KEY_STORAGE = 'stock_fmp_key';
+  const API_KEY_STORAGE    = 'stock_anthropic_key';
+  const AV_KEY_STORAGE     = 'stock_av_key';
+  const FMP_KEY_STORAGE    = 'stock_fmp_key';
+  const JQ_REFRESH_KEY     = 'jquants_refresh';
+  const JQ_ID_KEY          = 'jquants_id';
+  const JQ_ID_EXPIRY_KEY   = 'jquants_id_exp';
+  const JQUANTS_BASE       = 'https://api.jquants.com/v1';
+  const CORS_PROXY         = 'https://corsproxy.io/?';
+
+  // Set by fetchLivePrice; used by applyJQuantsMetrics for PER/PBR/yield
+  let latestJPPrice = null;
+  let jqEPS = null, jqBPS = null, jqDPS = null;
 
   const METRIC_DEFS = {
     per: {
@@ -951,6 +981,10 @@
     if (avSaved) document.getElementById('av-key-input').value = avSaved;
     const fmpSaved = localStorage.getItem(FMP_KEY_STORAGE);
     if (fmpSaved) document.getElementById('fmp-key-input').value = fmpSaved;
+    if (localStorage.getItem(JQ_REFRESH_KEY)) {
+      document.getElementById('jq-status').textContent = '✓ 認証済み';
+      document.getElementById('jq-status').style.color = 'var(--green)';
+    }
   });
 
   // ===== Settings =====
@@ -1278,6 +1312,7 @@ Use your training data for approximate figures. All values are estimates for edu
       const latestDay = q['07. latest trading day'] || '';
 
       const isJP = country === 'JP';
+      if (isJP) { latestJPPrice = price; tryUpdatePERPBR(); }
       const currencyLabel = isJP ? '円' : 'USD';
       const fmt = (v, decimals) => isJP
         ? Math.round(v).toLocaleString('ja-JP')
@@ -1375,40 +1410,162 @@ Use your training data for approximate figures. All values are estimates for edu
     }
   }
 
+  // ===== J-Quants (JP stocks) =====
+  async function jqRequest(url, opts = {}) {
+    // Try direct first (J-Quants may support CORS); fallback to proxy
+    try {
+      const r = await fetch(url, opts);
+      if (r.ok) return r.json();
+      if (r.status !== 0) throw new Error(`HTTP ${r.status}`); // real error, no retry
+    } catch (e) {
+      if (!e.message.startsWith('HTTP')) {
+        // Network/CORS error — try proxy
+        const r2 = await fetch(CORS_PROXY + encodeURIComponent(url), opts);
+        if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
+        return r2.json();
+      }
+      throw e;
+    }
+    throw new Error('J-Quants request failed');
+  }
+
+  async function getJQIdToken() {
+    const cached = localStorage.getItem(JQ_ID_KEY);
+    const expiry = parseInt(localStorage.getItem(JQ_ID_EXPIRY_KEY) || '0');
+    if (cached && Date.now() < expiry - 60000) return cached;
+
+    const refresh = localStorage.getItem(JQ_REFRESH_KEY);
+    if (!refresh) throw new Error('J-Quantsの認証が必要です。⚙ 設定でログインしてください');
+
+    const data = await jqRequest(
+      `${JQUANTS_BASE}/token/auth_refresh?refreshtoken=${encodeURIComponent(refresh)}`,
+      { method: 'POST' }
+    );
+    if (!data.idToken) { localStorage.removeItem(JQ_REFRESH_KEY); throw new Error('リフレッシュトークン期限切れ。再ログインしてください'); }
+    localStorage.setItem(JQ_ID_KEY, data.idToken);
+    localStorage.setItem(JQ_ID_EXPIRY_KEY, String(Date.now() + 23 * 60 * 60 * 1000));
+    return data.idToken;
+  }
+
+  async function loginJQuants() {
+    const email = document.getElementById('jq-email').value.trim();
+    const pass  = document.getElementById('jq-pass').value.trim();
+    const status = document.getElementById('jq-status');
+    if (!email || !pass) { status.textContent = 'メールとパスワードを入力してください'; status.style.color = 'var(--red)'; return; }
+    status.textContent = 'ログイン中...'; status.style.color = 'var(--text3)';
+    try {
+      const data = await jqRequest(`${JQUANTS_BASE}/token/auth_user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mailaddress: email, password: pass }),
+      });
+      if (!data.refreshToken) throw new Error('リフレッシュトークンが取得できませんでした');
+      localStorage.setItem(JQ_REFRESH_KEY, data.refreshToken);
+      localStorage.removeItem(JQ_ID_KEY);
+      localStorage.removeItem(JQ_ID_EXPIRY_KEY);
+      document.getElementById('jq-pass').value = '';
+      status.textContent = '✓ ログイン成功'; status.style.color = 'var(--green)';
+    } catch (e) {
+      status.textContent = '✗ ' + e.message; status.style.color = 'var(--red)';
+    }
+  }
+
   async function loadRealDataJP(ticker, histSection) {
-    const fmpKey = localStorage.getItem(FMP_KEY_STORAGE);
-    if (!fmpKey) {
-      if (histSection) histSection.innerHTML = `<div class="s-hist-na">日本株の財務実績を表示するには ⚙ 設定 から <a href="https://financialmodelingprep.com/register" target="_blank" rel="noopener" style="color:var(--accent)">FMP APIキー</a>（無料・250回/日）を登録してください。</div>`;
+    if (!localStorage.getItem(JQ_REFRESH_KEY)) {
+      if (histSection) histSection.innerHTML = `<div class="s-hist-na">
+        日本株の財務実績を表示するには ⚙ 設定 から
+        <a href="https://jpx-jquants.com/" target="_blank" rel="noopener" style="color:var(--accent)">J-Quants</a>（JPX公式・無料）に
+        登録してログインしてください。
+      </div>`;
       return;
     }
-
-    const symbol = ticker.replace(/\.(T|TYO|JP)$/i, '') + '.T';
-
+    const code = ticker.replace(/\.(T|TYO|JP)$/i, '');
     try {
-      const [ratiosRes, incRes, cfRes, bsRes] = await Promise.allSettled([
-        fetchFMP(`ratios-ttm/${symbol}`, fmpKey),
-        fetchFMP(`income-statement/${symbol}?period=annual&limit=15`, fmpKey),
-        fetchFMP(`cash-flow-statement/${symbol}?period=annual&limit=15`, fmpKey),
-        fetchFMP(`balance-sheet-statement/${symbol}?period=annual&limit=1`, fmpKey),
+      const idToken = await getJQIdToken();
+      const authHeader = { Authorization: `Bearer ${idToken}` };
+
+      const [stmtRes, divRes] = await Promise.allSettled([
+        jqRequest(`${JQUANTS_BASE}/fins/statements?code=${encodeURIComponent(code)}`, { headers: authHeader }),
+        jqRequest(`${JQUANTS_BASE}/fins/dividend?code=${encodeURIComponent(code)}`,   { headers: authHeader }),
       ]);
 
-      if (ratiosRes.status === 'fulfilled' && Array.isArray(ratiosRes.value) && ratiosRes.value[0]) {
-        const bs0 = (bsRes.status === 'fulfilled' && Array.isArray(bsRes.value)) ? bsRes.value[0] : null;
-        applyFMPRatios(ratiosRes.value[0], bs0);
-      }
+      const stmts = stmtRes.status === 'fulfilled' ? (stmtRes.value?.statements || []) : [];
+      const divs  = divRes.status  === 'fulfilled' ? (divRes.value?.dividend    || []) : [];
 
-      const incData = (incRes.status === 'fulfilled' && Array.isArray(incRes.value)) ? incRes.value : null;
-      const cfData  = (cfRes.status  === 'fulfilled' && Array.isArray(cfRes.value))  ? cfRes.value  : null;
-
-      if (incData?.length || cfData?.length) {
-        renderHistoryFMP(incData, cfData, histSection);
-      } else {
-        const errMsg = [incRes, cfRes].find(r => r.status === 'rejected')?.reason?.message || '—';
-        if (histSection) histSection.innerHTML = `<div class="s-hist-na">履歴データを取得できませんでした（${esc(errMsg)}）。FMPの無料プランで日本株の財務諸表が利用できない場合があります。</div>`;
+      if (stmts.length === 0) {
+        if (histSection) histSection.innerHTML = `<div class="s-hist-na">財務データが見つかりませんでした（コード: ${esc(code)}）</div>`;
+        return;
       }
+      applyJQuantsMetrics(stmts);
+      renderJQuantsHistory(stmts, histSection);
     } catch (e) {
-      if (histSection) histSection.innerHTML = `<div class="s-hist-na">FMP取得エラー: ${esc(e.message)}</div>`;
+      if (histSection) histSection.innerHTML = `<div class="s-hist-na">J-Quants取得エラー: ${esc(e.message)}</div>`;
     }
+  }
+
+  function jqAnnual(stmts) {
+    return stmts
+      .filter(s => s.TypeOfDocument === 'FYResults' || s.TypeOfCurrentPeriod === 'FY' ||
+        ((s.CurrentFiscalYearStartDate && s.CurrentFiscalYearEndDate) &&
+          (new Date(s.CurrentFiscalYearEndDate) - new Date(s.CurrentFiscalYearStartDate)) > 300 * 86400000))
+      .sort((a, b) => (b.CurrentFiscalYearEndDate || '').localeCompare(a.CurrentFiscalYearEndDate || ''));
+  }
+
+  function applyJQuantsMetrics(stmts) {
+    const annual = jqAnnual(stmts);
+    if (!annual.length) return;
+    const s   = annual[0];
+    const pf  = v => { const n = Number(v); return (!isNaN(n) && n !== 0) ? n : null; };
+
+    const netSales = pf(s.NetSales), opProfit = pf(s.OperatingProfit);
+    const profit   = pf(s.Profit),   equity   = pf(s.Equity), totalAssets = pf(s.TotalAssets);
+    const eqRatio  = pf(s.EquityToAssetRatio); // decimal
+
+    jqEPS = pf(s.EarningsPerShare);
+    jqBPS = pf(s.BookValuePerShare);
+    jqDPS = pf(s.Dividend);
+
+    const metrics = {
+      roe:              profit && equity      && equity > 0      ? profit / equity      * 100 : null,
+      roa:              profit && totalAssets && totalAssets > 0 ? profit / totalAssets * 100 : null,
+      operating_margin: opProfit && netSales  && netSales > 0   ? opProfit / netSales  * 100 : null,
+      equity_ratio:     eqRatio != null ? eqRatio * 100 : (equity && totalAssets && totalAssets > 0 ? equity / totalAssets * 100 : null),
+      revenue:          netSales != null ? Math.round(netSales / 1e8) : null,
+    };
+    for (const [key, value] of Object.entries(metrics)) {
+      if (value == null) continue;
+      updateMetricCard(key, value, key === 'revenue' ? '億円' : '%', 'J-Quants');
+    }
+    tryUpdatePERPBR();
+  }
+
+  function tryUpdatePERPBR() {
+    if (latestJPPrice == null) return;
+    if (jqEPS && jqEPS > 0) updateMetricCard('per', latestJPPrice / jqEPS, '倍', 'J-Quants');
+    if (jqBPS && jqBPS > 0) updateMetricCard('pbr', latestJPPrice / jqBPS, '倍', 'J-Quants');
+    if (jqDPS && latestJPPrice > 0) updateMetricCard('dividend_yield', jqDPS / latestJPPrice * 100, '%', 'J-Quants');
+  }
+
+  function renderJQuantsHistory(stmts, section) {
+    const annual = jqAnnual(stmts).slice(0, 15).reverse();
+    if (!annual.length) { section.innerHTML = `<div class="s-hist-na">年次データが見つかりませんでした</div>`; return; }
+
+    const fakeInc = { annualReports: annual.map(s => ({
+      fiscalDateEnding: s.CurrentFiscalYearEndDate || '',
+      totalRevenue:    Number(s.NetSales)        || null,
+      netIncome:       Number(s.Profit)          || null,
+      operatingIncome: Number(s.OperatingProfit) || null,
+    })) };
+
+    const fakeCf = { annualReports: annual.map(s => {
+      const eps = Number(s.EarningsPerShare) || null;
+      const dps = Number(s.Dividend)        || null;
+      const ni  = Number(s.Profit)          || null;
+      const dp  = (eps && dps && ni && eps > 0) ? ni * (dps / eps) : null;
+      return { fiscalDateEnding: s.CurrentFiscalYearEndDate || '', dividendPayout: dp };
+    }) };
+
+    renderHistory(fakeInc, fakeCf, section, '業績・配当性向推移（J-Quants · 最大15年）');
   }
 
   async function fetchFMP(path, apiKey) {
