@@ -905,6 +905,21 @@
       isBad: v => v < 1,
       formatVal: v => v == null ? 'N/A' : v.toFixed(2),
     },
+    dividend_per_share: {
+      name: '1株配当',
+      fullName: '1株当たり配当金 (Dividend Per Share)',
+      unit: '円/株',
+      desc: '1株当たりの年間配当金額。株主への直接的な現金還元の額を示す。増配が継続しているかどうかも株主還元姿勢を見る上で重要な指標。',
+      bench: '増配継続は株主還元意欲の高さを示すサイン。配当性向（DPS÷EPS）が80%超は持続性に注意。',
+      isGood: () => null,
+      isWarn: () => null,
+      isBad: () => null,
+      formatVal: (v, unit) => {
+        if (v == null) return 'N/A';
+        if (unit === '$/株') return '$' + v.toFixed(2);
+        return v.toFixed(1) + '円';
+      },
+    },
     market_cap: {
       name: '時価総額',
       fullName: '時価総額 (Market Capitalization)',
@@ -1046,6 +1061,7 @@ Return ONLY valid JSON (no markdown, no explanation) matching this exact structu
     "equity_ratio": { "value": 43.2, "as_of": "FY2024" },
     "operating_margin": { "value": 9.5, "as_of": "FY2024" },
     "dividend_yield": { "value": 2.1, "as_of": "直近" },
+    "dividend_per_share": { "value": 60, "as_of": "FY2024", "unit": "円/株" },
     "market_cap": { "value": 400000, "as_of": "概算", "unit": "億円" },
     "revenue": { "value": 450000, "as_of": "FY2024", "unit": "億円" }
   },
@@ -1057,7 +1073,7 @@ Return ONLY valid JSON (no markdown, no explanation) matching this exact structu
   "data_note": "データの時点や精度に関する注記（簡潔に）"
 }
 
-For US stocks: use "百万ドル" as unit for market_cap and revenue. For JP stocks: use "億円".
+For US stocks: use "百万ドル" as unit for market_cap and revenue, and "$/株" for dividend_per_share. For JP stocks: use "億円" and "円/株".
 If the company is not found or ambiguous, return: { "found": false, "message": "理由（日本語）" }
 Use your training data for approximate figures. All values are estimates for educational purposes.`;
 
@@ -1490,6 +1506,7 @@ Use your training data for approximate figures. All values are estimates for edu
       if (value == null) continue;
       updateMetricCard(key, value, key === 'revenue' ? '億円' : '%', 'J-Quants');
     }
+    if (jqDPS != null) updateMetricCard('dividend_per_share', jqDPS, '円/株', 'J-Quants');
     tryUpdatePERPBR();
   }
 
@@ -1547,7 +1564,8 @@ Use your training data for approximate figures. All values are estimates for edu
       roa:              { value: pf(r.returnOnAssetsTTM)        != null ? pf(r.returnOnAssetsTTM)        * 100 : null, unit: '%' },
       equity_ratio:     { value: equityRatio,                                                              unit: '%' },
       operating_margin: { value: pf(r.operatingProfitMarginTTM) != null ? pf(r.operatingProfitMarginTTM) * 100 : null, unit: '%' },
-      dividend_yield:   { value: pf(r.dividendYieldTTM)         != null ? pf(r.dividendYieldTTM)         * 100 : null, unit: '%' },
+      dividend_yield:       { value: pf(r.dividendYieldTTM)         != null ? pf(r.dividendYieldTTM)         * 100 : null, unit: '%' },
+      dividend_per_share:   { value: pf(r.dividendPerShareTTM),                                                             unit: '$/株' },
     };
 
     for (const [key, d] of Object.entries(mapping)) {
@@ -1581,7 +1599,8 @@ Use your training data for approximate figures. All values are estimates for edu
       roe:              { value: pf(ov['ReturnOnEquityTTM'])     != null ? pf(ov['ReturnOnEquityTTM'])     * 100 : null, unit: '%', asof: 'TTM' },
       roa:              { value: pf(ov['ReturnOnAssetsTTM'])     != null ? pf(ov['ReturnOnAssetsTTM'])     * 100 : null, unit: '%', asof: 'TTM' },
       operating_margin: { value: pf(ov['OperatingMarginTTM'])    != null ? pf(ov['OperatingMarginTTM'])    * 100 : null, unit: '%', asof: 'TTM' },
-      dividend_yield:   { value: pf(ov['DividendYield'])         != null ? pf(ov['DividendYield'])         * 100 : null, unit: '%', asof: '直近' },
+      dividend_yield:       { value: pf(ov['DividendYield'])         != null ? pf(ov['DividendYield'])         * 100 : null, unit: '%',    asof: '直近' },
+      dividend_per_share:   { value: pf(ov['DividendPerShare']),                                                             unit: '$/株', asof: '直近' },
       market_cap:       { value: pf(ov['MarketCapitalization'])  != null ? Math.round(pf(ov['MarketCapitalization'])  / 1e6) : null, unit: '百万ドル', asof: '現在' },
       revenue:          { value: pf(ov['RevenueTTM'])            != null ? Math.round(pf(ov['RevenueTTM'])            / 1e6) : null, unit: '百万ドル', asof: 'TTM'  },
     };
